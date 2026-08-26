@@ -1,0 +1,16 @@
+fred:
+  DFF: Fed Funds Effective Rate
+  DGS2: US 2Y Treasury
+  DGS10: US 10Y Treasury
+  DFII10: 10Y Real Yield
+  T10Y2Y: 10Y-2Y Yield Curve
+  DTWEXBGS: Broad Dollar Index
+  VIXCLS: VIX
+  WALCL: Federal Reserve Total Assets
+  M2SL: M2 Money Stock
+  DCOILWTICO: WTI Crude Oil
+  DCOILBRENTEU: Brent Crude Oil
+  BAMLH0A0HYM2: US High Yield Spread
+bls:
+  CUUR0000SA0: CPI All Items
+  CUSR0000SA0L1E: CPI Less Food and Energy
