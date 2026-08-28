@@ -10,13 +10,13 @@ def create_database(db_path: Path, timestamp: str):
             """
             CREATE TABLE observations (
                 id INTEGER PRIMARY KEY,
-                updated_at TEXT
+                retrieved_at TEXT
             )
             """
         )
 
         conn.execute(
-            "INSERT INTO observations (updated_at) VALUES (?)",
+            "INSERT INTO observations (retrieved_at) VALUES (?)",
             (timestamp,),
         )
 
