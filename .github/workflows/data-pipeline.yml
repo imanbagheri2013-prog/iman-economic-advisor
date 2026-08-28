@@ -28,15 +28,15 @@ jobs:
             pip install -r requirements.txt
           fi
 
-      - name: Run data pipeline
+      - name: Run automated data pipeline
         env:
           FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
         run: |
           python -m iea.scheduler
 
-      - name: Run data health monitor
+      - name: Run unified data health report
         run: |
-          python -m iea.health_monitor
+          python -m iea.health_report
 
       - name: Upload health report
         if: always()
