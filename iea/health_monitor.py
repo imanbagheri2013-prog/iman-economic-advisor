@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-DEFAULT_DB = Path("data/economic_data.db")
+DEFAULT_DB = Path("data/iea.sqlite3")
 
 
 def _utc_now() -> datetime:
