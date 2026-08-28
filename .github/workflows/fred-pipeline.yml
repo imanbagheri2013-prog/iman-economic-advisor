@@ -1,0 +1,57 @@
+name: FRED Pipeline Live Test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  fred-pipeline:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -e .
+
+      - name: Run FRED pipeline
+        env:
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+          IEA_DB_PATH: data/fred-live.sqlite3
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          from iea.pipeline import pull
+
+          store = pull()
+
+          try:
+              count = store.count()
+
+              print(f"Stored observations: {count}")
+
+              if count <= 0:
+                  raise SystemExit(
+                      "Pipeline completed but no observations were stored"
+                  )
+          finally:
+              store.close()
+
+          db = Path("data/fred-live.sqlite3")
+
+          if not db.exists():
+              raise SystemExit(
+                  "SQLite database was not created"
+              )
+
+          print(f"SQLite database created: {db}")
+          PY
