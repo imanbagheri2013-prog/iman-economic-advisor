@@ -17,7 +17,7 @@ def run() -> dict:
         "started_at": started,
         "finished_at": datetime.now(timezone.utc).isoformat(),
         "status": "ok",
-        "database": getattr(store, "db_path", None),
+        "database": str(getattr(store, "path", "")),
     }
 
     print(json.dumps(payload, default=str, indent=2))
