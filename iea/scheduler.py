@@ -5,19 +5,19 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 
-from .pipeline import main as pipeline_main
+from .pipeline import pull
 
 
 def run() -> dict:
     started = datetime.now(timezone.utc).isoformat()
 
-    result = pipeline_main()
+    store = pull()
 
     payload = {
         "started_at": started,
         "finished_at": datetime.now(timezone.utc).isoformat(),
         "status": "ok",
-        "result": result,
+        "database": getattr(store, "db_path", None),
     }
 
     print(json.dumps(payload, default=str, indent=2))
