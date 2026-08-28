@@ -5,13 +5,13 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 
-from .pipeline import run_pipeline
+from .pipeline import main as pipeline_main
 
 
 def run() -> dict:
     started = datetime.now(timezone.utc).isoformat()
 
-    result = run_pipeline()
+    result = pipeline_main()
 
     payload = {
         "started_at": started,
