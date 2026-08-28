@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "iea-data-engine"
+version = "1.2.0"
+description = "IEA Economic Data Engine"
+requires-python = ">=3.9"
+
+[tool.setuptools.packages.find]
+include = ["iea*"]
