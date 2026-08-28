@@ -10,7 +10,7 @@ from .data_freshness import check_table_freshness
 from .health_monitor import check_database
 
 
-DEFAULT_DB = Path("data/economic_data.db")
+DEFAULT_DB = Path("data/iea.sqlite3")
 
 
 def _utc_now() -> str:
@@ -25,7 +25,7 @@ def build_full_health_report(
     freshness = check_table_freshness(
         db_path=db_path,
         table_name="observations",
-        timestamp_column="updated_at",
+        timestamp_column="retrieved_at",
         max_age_hours=48,
     )
 
