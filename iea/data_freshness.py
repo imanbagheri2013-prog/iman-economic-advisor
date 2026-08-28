@@ -34,7 +34,7 @@ def _parse_datetime(value: str | None) -> datetime | None:
 def check_table_freshness(
     db_path: str | Path = DEFAULT_DB,
     table_name: str = "observations",
-    timestamp_column: str = "updated_at",
+    timestamp_column: str = "retrieved_at",
     max_age_hours: int = 48,
 ) -> dict:
     path = Path(db_path)
@@ -62,6 +62,7 @@ def check_table_freshness(
                 }
 
             safe_column = timestamp_column.replace('"', '""')
+
             latest = conn.execute(
                 f'SELECT MAX("{safe_column}") FROM "{table_name}"'
             ).fetchone()[0]
