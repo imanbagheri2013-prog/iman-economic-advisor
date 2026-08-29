@@ -31,4 +31,3 @@ steps:
       BLS_END_YEAR: "2026"
       IEA_DB_PATH: "data/iea.sqlite3"
     run: python -m iea.scheduler
-```
