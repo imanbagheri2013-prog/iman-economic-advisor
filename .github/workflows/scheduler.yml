@@ -4,11 +4,10 @@ on:
 workflow_dispatch:
 
 jobs:
-scheduler:
-runs-on: ubuntu-latest
-steps:
-- name: Checkout
-uses: actions/checkout@v4
+  scheduler:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
 
 - name: Setup Python
   uses: actions/setup-python@v5
@@ -24,5 +23,4 @@ uses: actions/checkout@v4
     BLS_START_YEAR: "2021"
     BLS_END_YEAR: "2026"
     IEA_DB_PATH: "data/iea.sqlite3"
-  run: python -m iea.scheduler
-
+       run: python -m iea.scheduler
