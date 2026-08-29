@@ -1,0 +1,83 @@
+name: Unified Health Live Test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  unified-health:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -e .
+
+      - name: Run unified pipeline
+        env:
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+          IEA_DB_PATH: data/unified-health-live.sqlite3
+          BLS_START_YEAR: "2025"
+          BLS_END_YEAR: "2026"
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          from iea.pipeline import pull
+          from iea.health import check_all, overall_status
+
+          db = Path("data/unified-health-live.sqlite3")
+
+          store = pull()
+
+          try:
+              results = check_all(store)
+              status = overall_status(results)
+
+              print("")
+              print("=== DATA HEALTH REPORT ===")
+
+              for result in results:
+                  print(
+                      f"{result['provider']} | "
+                      f"{result['series_id']} | "
+                      f"records={result['record_count']} | "
+                      f"missing={result['missing_count']} | "
+                      f"latest={result['latest_date']} | "
+                      f"freshness_days={result['freshness_days']} | "
+                      f"status={result['status']}"
+                  )
+
+              print("")
+              print(f"OVERALL STATUS: {status}")
+
+          finally:
+              store.close()
+
+          if not db.exists():
+              raise SystemExit(
+                  "SQLite database was not created"
+              )
+
+          if not results:
+              raise SystemExit(
+                  "Health Monitor returned no results"
+              )
+
+          if status == "CRITICAL":
+              raise SystemExit(
+                  "Data Health Monitor reported CRITICAL"
+              )
+
+          print("")
+          print("Unified pipeline + health monitoring succeeded")
+          PY
