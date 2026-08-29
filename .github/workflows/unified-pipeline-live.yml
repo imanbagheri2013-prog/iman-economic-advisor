@@ -1,0 +1,62 @@
+name: Unified Pipeline Live Test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  unified-pipeline:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -e .
+
+      - name: Run unified FRED + BLS pipeline
+        env:
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+          IEA_DB_PATH: data/unified-live.sqlite3
+          BLS_START_YEAR: "2025"
+          BLS_END_YEAR: "2026"
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          from iea.pipeline import pull
+
+          db = Path("data/unified-live.sqlite3")
+          store = pull()
+
+          try:
+              rows = store.conn.execute(
+                  "SELECT provider, COUNT(*) FROM observations GROUP BY provider"
+              ).fetchall()
+          finally:
+              store.close()
+
+          counts = {provider: count for provider, count in rows}
+
+          print(f"FRED observations stored: {counts.get('fred', 0)}")
+          print(f"BLS observations stored: {counts.get('bls', 0)}")
+
+          if counts.get("fred", 0) <= 0:
+              raise SystemExit("No FRED observations were stored")
+
+          if counts.get("bls", 0) <= 0:
+              raise SystemExit("No BLS observations were stored")
+
+          if not db.exists():
+              raise SystemExit("SQLite database was not created")
+
+          print("Unified FRED + BLS pipeline succeeded")
+          PY
