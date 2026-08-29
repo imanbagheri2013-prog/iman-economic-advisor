@@ -1,5 +1,6 @@
 from datetime import date, datetime, timezone
 
+from iea.models import Observation
 from iea.pipeline import pull_and_check
 from iea.storage import Store
 
@@ -22,64 +23,6 @@ monkeypatch.setenv(
     "2026",
 )
 
-store = Store(db_path)
-
-try:
-    from iea.models import Observation
-
-    store.upsert(
-        Observation(
-            provider="fred",
-            series_id="TEST_FRED",
-            date=date(2026, 8, 1),
-            value=100.0,
-            retrieved_at=datetime.now(timezone.utc),
-            quality=1.0,
-            status="ok",
-        )
-    )
-
-finally:
-    store.close()
-
-class FakeProvider:
-    def observations(self, series_id, *args, **kwargs):
-        return [
-            Observation(
-                provider="fred",
-                series_id=series_id,
-                date=date(2026, 8, 1),
-                value=100.0,
-                retrieved_at=datetime.now(timezone.utc),
-                quality=1.0,
-                status="ok",
-            )
-        ]
-
-monkeypatch.setattr(
-    "iea.pipeline.FRED",
-    FakeProvider,
-)
-
-class FakeBLSProvider:
-    def observations(self, series_id, *args, **kwargs):
-        return [
-            Observation(
-                provider="bls",
-                series_id=series_id,
-                date=date(2026, 8, 1),
-                value=200.0,
-                retrieved_at=datetime.now(timezone.utc),
-                quality=1.0,
-                status="ok",
-            )
-        ]
-
-monkeypatch.setattr(
-    "iea.pipeline.BLS",
-    FakeBLSProvider,
-)
-
 config_path = tmp_path / "series.yaml"
 
 config_path.write_text(
@@ -96,6 +39,44 @@ encoding="utf-8",
 )
 
 ```
+class FakeFRED:
+    def observations(self, series_id, *args, **kwargs):
+        return [
+            Observation(
+                provider="fred",
+                series_id=series_id,
+                date=date(2026, 8, 1),
+                value=100.0,
+                retrieved_at=datetime.now(timezone.utc),
+                quality=1.0,
+                status="ok",
+            )
+        ]
+
+class FakeBLS:
+    def observations(self, series_id, *args, **kwargs):
+        return [
+            Observation(
+                provider="bls",
+                series_id=series_id,
+                date=date(2026, 8, 1),
+                value=200.0,
+                retrieved_at=datetime.now(timezone.utc),
+                quality=1.0,
+                status="ok",
+            )
+        ]
+
+monkeypatch.setattr(
+    "iea.pipeline.FRED",
+    FakeFRED,
+)
+
+monkeypatch.setattr(
+    "iea.pipeline.BLS",
+    FakeBLS,
+)
+
 store, results, status = pull_and_check(
     str(config_path)
 )
