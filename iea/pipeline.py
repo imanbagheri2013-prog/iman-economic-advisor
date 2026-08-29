@@ -1,10 +1,11 @@
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml
 
-from .providers.fred import FRED
 from .providers.bls import BLS
+from .providers.fred import FRED
 from .storage import Store
 
 
@@ -29,11 +30,40 @@ def load_config(path="config/series.yaml"):
         return yaml.safe_load(file) or {}
 
 
-def pull():
+def _bls_year_range():
     """
-    Pull configured economic observations and store them locally.
+    Return the BLS year range used by the live pipeline.
+
+    BLS_START_YEAR and BLS_END_YEAR can be supplied through
+    environment variables. By default, the pipeline uses the
+    previous five years through the current UTC year.
     """
-    config = load_config()
+    current_year = datetime.now(timezone.utc).year
+
+    start_year = int(
+        os.getenv("BLS_START_YEAR", str(current_year - 5))
+    )
+
+    end_year = int(
+        os.getenv("BLS_END_YEAR", str(current_year))
+    )
+
+    if start_year > end_year:
+        raise ValueError(
+            "BLS_START_YEAR cannot be greater than BLS_END_YEAR"
+        )
+
+    return start_year, end_year
+
+
+def pull(config_path="config/series.yaml"):
+    """
+    Pull configured economic observations from FRED and BLS
+    and store them in the local SQLite database.
+
+    Returns the open Store instance.
+    """
+    config = load_config(config_path)
 
     db_path = os.getenv(
         "IEA_DB_PATH",
@@ -42,10 +72,10 @@ def pull():
 
     store = Store(db_path)
 
-    for series_id in config.get("fred", {}):
-        provider = FRED()
+    fred_provider = FRED()
 
-        observations = provider.observations(
+    for series_id in config.get("fred", {}):
+        observations = fred_provider.observations(
             series_id,
             limit=20,
         )
@@ -53,13 +83,15 @@ def pull():
         for observation in observations:
             store.upsert(observation)
 
-    for series_id in config.get("bls", {}):
-        provider = BLS()
+    bls_start_year, bls_end_year = _bls_year_range()
 
-        observations = provider.observations(
+    bls_provider = BLS()
+
+    for series_id in config.get("bls", {}):
+        observations = bls_provider.observations(
             series_id,
-            2020,
-            2026,
+            bls_start_year,
+            bls_end_year,
         )
 
         for observation in observations:
