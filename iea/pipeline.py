@@ -1,9 +1,11 @@
+```python
 import os
 from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml
 
+from .health import check_all, overall_status
 from .providers.bls import BLS
 from .providers.fred import FRED
 from .storage import Store
@@ -98,3 +100,21 @@ def pull(config_path="config/series.yaml"):
             store.upsert(observation)
 
     return store
+
+
+def pull_and_check(config_path="config/series.yaml"):
+    """
+    Run the unified FRED + BLS pipeline and then evaluate data health.
+
+    Returns:
+        store: Open SQLite Store instance.
+        results: Per-series health results.
+        status: Overall health status.
+    """
+    store = pull(config_path)
+
+    results = check_all(store)
+    status = overall_status(results)
+
+    return store, results, status
+```
