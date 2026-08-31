@@ -13,7 +13,6 @@ def load_config(path="config/series.yaml"):
 """
 Load the Data Engine series configuration.
 
-```
 The configuration is resolved first from the current working
 directory and then relative to the repository root.
 """
@@ -29,13 +28,11 @@ if not config_path.exists():
 
 with config_path.open(encoding="utf-8") as file:
     return yaml.safe_load(file) or {}
-```
 
 def _bls_year_range():
 """
 Return the BLS year range used by the live pipeline.
 
-```
 BLS_START_YEAR and BLS_END_YEAR can be supplied through
 environment variables. By default, the pipeline uses the
 previous five years through the current UTC year.
@@ -56,14 +53,12 @@ if start_year > end_year:
     )
 
 return start_year, end_year
-```
 
 def pull(config_path="config/series.yaml"):
 """
 Pull configured economic observations from FRED and BLS
 and store them in the local SQLite database.
 
-```
 Returns the open Store instance.
 """
 config = load_config(config_path)
@@ -101,13 +96,11 @@ for series_id in config.get("bls", {}):
         store.upsert(observation)
 
 return store
-```
 
 def pull_and_check(config_path="config/series.yaml"):
 """
 Run the unified FRED + BLS pipeline and then evaluate data health.
 
-```
 Returns:
     store: Open SQLite Store instance.
     results: Per-series health results.
@@ -119,4 +112,3 @@ results = check_all(store)
 status = overall_status(results)
 
 return store, results, status
-```
