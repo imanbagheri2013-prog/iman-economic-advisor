@@ -1,11 +1,14 @@
 """Automation entrypoint for scheduled economic data ingestion."""
 
+from **future** import annotations
+
 import json
 from datetime import datetime, timezone
 
 from .pipeline import pull_and_check
 
 def run() -> dict:
+"""Run the economic data pipeline and report its health."""
 started = datetime.now(timezone.utc).isoformat()
 
 store, health_results, health_status = pull_and_check()
