@@ -1,67 +1,80 @@
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import sqlite3
 
 from iea.data_freshness import check_table_freshness
 
-
 def create_database(db_path: Path, timestamp: str):
-    with sqlite3.connect(db_path) as conn:
-        conn.execute(
-            """
-            CREATE TABLE observations (
-                id INTEGER PRIMARY KEY,
-                retrieved_at TEXT
-            )
-            """
-        )
+with sqlite3.connect(db_path) as conn:
+conn.execute(
+"""
+CREATE TABLE observations (
+id INTEGER PRIMARY KEY,
+retrieved_at TEXT
+)
+"""
+)
 
-        conn.execute(
-            "INSERT INTO observations (retrieved_at) VALUES (?)",
-            (timestamp,),
-        )
+```
+    conn.execute(
+        "INSERT INTO observations (retrieved_at) VALUES (?)",
+        (timestamp,),
+    )
 
-        conn.commit()
-
+    conn.commit()
+```
 
 def test_fresh_data(tmp_path: Path):
-    db_path = tmp_path / "economic_data.db"
+db_path = tmp_path / "economic_data.db"
 
-    create_database(
-        db_path,
-        "2026-08-28T10:00:00+00:00",
-    )
+```
+fresh_timestamp = (
+    datetime.now(timezone.utc) - timedelta(hours=1)
+).isoformat()
 
-    result = check_table_freshness(
-        db_path=db_path,
-        max_age_hours=48,
-    )
+create_database(
+    db_path,
+    fresh_timestamp,
+)
 
-    assert result["status"] == "ok"
-    assert result["age_hours"] <= 48
+result = check_table_freshness(
+    db_path=db_path,
+    max_age_hours=48,
+)
 
+assert result["status"] == "ok"
+assert result["age_hours"] <= 48
+```
 
 def test_stale_data(tmp_path: Path):
-    db_path = tmp_path / "economic_data.db"
+db_path = tmp_path / "economic_data.db"
 
-    create_database(
-        db_path,
-        "2026-08-20T10:00:00+00:00",
-    )
+```
+stale_timestamp = (
+    datetime.now(timezone.utc) - timedelta(hours=72)
+).isoformat()
 
-    result = check_table_freshness(
-        db_path=db_path,
-        max_age_hours=48,
-    )
+create_database(
+    db_path,
+    stale_timestamp,
+)
 
-    assert result["status"] == "stale"
+result = check_table_freshness(
+    db_path=db_path,
+    max_age_hours=48,
+)
 
+assert result["status"] == "stale"
+```
 
 def test_missing_database(tmp_path: Path):
-    db_path = tmp_path / "missing.db"
+db_path = tmp_path / "missing.db"
 
-    result = check_table_freshness(
-        db_path=db_path,
-        max_age_hours=48,
-    )
+```
+result = check_table_freshness(
+    db_path=db_path,
+    max_age_hours=48,
+)
 
-    assert result["status"] == "critical"
+assert result["status"] == "critical"
+```
