@@ -1,4 +1,5 @@
 """Automation entrypoint for scheduled economic data ingestion."""
+ingestion."""
 
 import json
 from datetime import datetime, timezone
