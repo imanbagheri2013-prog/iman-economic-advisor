@@ -1,13 +1,9 @@
-"""Automation entrypoint for scheduled economic data ingestion."""
-ingestion."""
-
 import json
 from datetime import datetime, timezone
 
 from .pipeline import pull_and_check
 
-def run() -> dict:
-"""Run the economic data pipeline and report its health."""
+def run():
 started = datetime.now(timezone.utc).isoformat()
 
 store, health_results, health_status = pull_and_check()
@@ -22,13 +18,7 @@ try:
         "database": str(getattr(store, "path", "")),
     }
 
-    print(
-        json.dumps(
-            payload,
-            default=str,
-            indent=2,
-        )
-    )
+    print(json.dumps(payload, default=str, indent=2))
 
     if health_status == "CRITICAL":
         raise RuntimeError(
