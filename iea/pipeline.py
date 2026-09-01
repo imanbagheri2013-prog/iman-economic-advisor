@@ -1,96 +1,62 @@
-"""Economic data ingestion pipeline."""
-
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
 from pathlib import Path
 
-import yaml
+from .health import check_table_freshness
+from .providers.bls import fetch_bls
+from .providers.fred import fetch_fred
+from .storage import DataStore
 
-from .health import check_all, overall_status
-from .providers.bls import BLS
-from .providers.fred import FRED
-from .storage import Store
+def load_config() -> dict:
+return {
+"fred_api_key": os.getenv("FRED_API_KEY", ""),
+"bls_start_year": int(os.getenv("BLS_START_YEAR", "2021")),
+"bls_end_year": int(os.getenv("BLS_END_YEAR", "2026")),
+"db_path": Path(os.getenv("IEA_DB_PATH", "data/iea.sqlite3")),
+}
 
-def load_config(path: str = "config/series.yaml") -> dict:
-"""Load the configured FRED and BLS series."""
-config_path = Path(path)
-
-if not config_path.exists():
-    config_path = Path(__file__).resolve().parent.parent / path
-
-if not config_path.exists():
-    raise FileNotFoundError(f"Configuration file not found: {path}")
-
-with config_path.open(encoding="utf-8") as file:
-    return yaml.safe_load(file) or {}
-
-def _bls_year_range() -> tuple[int, int]:
-"""Return the BLS year range configured for the pipeline."""
-current_year = datetime.now(timezone.utc).year
-
-start_year = int(
-    os.getenv("BLS_START_YEAR", str(current_year - 5))
-)
-
-end_year = int(
-    os.getenv("BLS_END_YEAR", str(current_year))
-)
-
-if start_year > end_year:
-    raise ValueError(
-        "BLS_START_YEAR cannot be greater than BLS_END_YEAR"
-    )
-
+def _bls_year_range(config: dict) -> tuple[str, str]:
+start_year = str(config["bls_start_year"])
+end_year = str(config["bls_end_year"])
 return start_year, end_year
 
-def pull(config_path: str = "config/series.yaml") -> Store:
-"""Pull configured FRED and BLS observations into SQLite."""
-config = load_config(config_path)
+def pull() -> DataStore:
+config = load_config()
 
-db_path = os.getenv(
-    "IEA_DB_PATH",
-    "data/iea.sqlite3",
+store = DataStore(config["db_path"])
+
+fred_data = fetch_fred(
+    api_key=config["fred_api_key"],
 )
 
-store = Store(db_path)
+bls_start_year, bls_end_year = _bls_year_range(config)
 
-fred_provider = FRED()
+bls_data = fetch_bls(
+    start_year=bls_start_year,
+    end_year=bls_end_year,
+)
 
-for series_id in config.get("fred", {}):
-    observations = fred_provider.observations(
-        series_id,
-        limit=20,
-    )
-
-    for observation in observations:
-        store.upsert(observation)
-
-bls_start_year, bls_end_year = _bls_year_range()
-
-bls_provider = BLS()
-
-for series_id in config.get("bls", {}):
-    observations = bls_provider.observations(
-        series_id,
-        bls_start_year,
-        bls_end_year,
-    )
-
-    for observation in observations:
-        store.upsert(observation)
+store.save_fred(fred_data)
+store.save_bls(bls_data)
 
 return store
 
-def pull_and_check(
-config_path: str = "config/series.yaml",
-) -> tuple[Store, list[dict], str]:
-"""Run ingestion and evaluate the resulting data health."""
-store = pull(config_path)
+def pull_and_check():
+store = pull()
 
-results = check_all(store)
+health_results = []
+health_status = "OK"
 
-status = overall_status(results)
+for table_name in store.table_names():
+    result = check_table_freshness(
+        db_path=store.path,
+        table_name=table_name,
+        max_age_hours=48,
+    )
+    health_results.append(result)
 
-return store, results, status
+    if result.get("status") != "ok":
+        health_status = "CRITICAL"
+
+return store, health_results, health_status
