@@ -33,6 +33,11 @@ def load_config(registry_path: str | Path = DEFAULT_REGISTRY) -> dict[str, Any]:
         "registry_path": path,
         "fred_series": list((registry.get("fred") or {}).keys()),
         "bls_series": list((registry.get("bls") or {}).keys()),
+        "closed_dates": [
+            value.strip()
+            for value in os.getenv("IEA_CLOSED_DATES", "").split(",")
+            if value.strip()
+        ],
     }
 
 
@@ -64,12 +69,17 @@ def pull(registry_path: str | Path = DEFAULT_REGISTRY) -> Store:
 
 
 def pull_and_check(registry_path: str | Path = DEFAULT_REGISTRY):
+    config = load_config(registry_path)
     store = pull(registry_path)
     try:
         freshness = check_table_freshness(
             db_path=store.path,
             table_name="observations",
             max_age_hours=48,
+            # FRED/BLS are business-day economic data sources; weekends
+            # should not consume the freshness budget.
+            closed_weekdays={5, 6},
+            closed_dates=config["closed_dates"],
         )
         status = "OK" if freshness.get("status") == "ok" else "CRITICAL"
         return store, [freshness], status
