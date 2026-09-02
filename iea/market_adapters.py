@@ -10,6 +10,7 @@ import requests
 
 BINANCE_FAPI = "https://fapi.binance.com"
 BYBIT_API = "https://api.bybit.com"
+OKX_API = "https://www.okx.com"
 
 
 @dataclass(frozen=True)
@@ -148,7 +149,6 @@ class BybitMarketAdapter:
         total_depth = None if bid_depth is None or ask_depth is None else bid_depth + ask_depth
         depth_imbalance = None if not total_depth else (bid_depth - ask_depth) / total_depth
 
-        # Bybit returns klines newest-first; exclude the current, unfinished candle.
         klines = list(reversed(klines))
         closed = klines[:-1] if len(klines) > 1 else klines
         closes = [float(row[4]) for row in closed]
@@ -182,12 +182,88 @@ class BybitMarketAdapter:
         )
 
 
-class ResilientMarketAdapter:
-    """Try the primary market provider, then a secondary provider."""
+class OKXMarketAdapter:
+    """Read public OKX BTC-USDT perpetual market data as a second fallback."""
 
-    def __init__(self, primary: Any | None = None, secondary: Any | None = None) -> None:
+    provider = "OKX_SWAP"
+
+    def __init__(self, symbol: str | None = None, timeout: float = 10.0) -> None:
+        self.symbol = (symbol or os.getenv("IEA_MARKET_SYMBOL", "BTCUSDT")).upper()
+        self.timeout = timeout
+        self.inst_id = self._instrument_id(self.symbol)
+
+    @staticmethod
+    def _instrument_id(symbol: str) -> str:
+        if symbol.endswith("USDT"):
+            return f"{symbol[:-4]}-USDT-SWAP"
+        if symbol.endswith("USD"):
+            return f"{symbol[:-3]}-USD-SWAP"
+        raise ValueError(f"Unsupported OKX symbol: {symbol}")
+
+    def _get(self, path: str, params: dict[str, Any]) -> dict[str, Any]:
+        response = requests.get(f"{OKX_API}{path}", params=params, timeout=self.timeout)
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, dict) or payload.get("code") != "0":
+            raise ValueError(f"OKX API error: {payload.get('code') if isinstance(payload, dict) else 'invalid_payload'}")
+        return payload
+
+    def snapshot(self) -> MarketSnapshot:
+        ticker = self._get("/api/v5/market/ticker", {"instId": self.inst_id})["data"][0]
+        book = self._get("/api/v5/market/books", {"instId": self.inst_id, "sz": "20"})["data"][0]
+        funding = self._get("/api/v5/public/funding-rate", {"instId": self.inst_id})["data"][0]
+        oi = self._get("/api/v5/public/open-interest", {"instType": "SWAP", "instId": self.inst_id})["data"][0]
+        candles = self._get("/api/v5/market/candles", {"instId": self.inst_id, "bar": "1H", "limit": "26"})["data"]
+
+        # OKX returns candles newest-first; exclude the current unfinished candle.
+        candles = list(reversed(candles))
+        closed = candles[:-1] if len(candles) > 1 else candles
+        closes = [float(row[4]) for row in closed]
+        volumes = [float(row[5]) for row in closed]
+        return_4h = (closes[-1] / closes[-5] - 1.0) * 100.0 if len(closes) >= 5 and closes[-5] else None
+        return_24h = (closes[-1] / closes[-25] - 1.0) * 100.0 if len(closes) >= 25 and closes[-25] else None
+        relative_volume = None
+        if len(volumes) >= 25:
+            baseline = sum(volumes[-25:-1]) / 24.0
+            if baseline > 0:
+                relative_volume = volumes[-1] / baseline
+
+        bids = [(float(row[0]), float(row[1])) for row in book.get("bids", [])]
+        asks = [(float(row[0]), float(row[1])) for row in book.get("asks", [])]
+        bid_depth = sum(price * qty for price, qty in bids) if bids else None
+        ask_depth = sum(price * qty for price, qty in asks) if asks else None
+        total_depth = None if bid_depth is None or ask_depth is None else bid_depth + ask_depth
+        depth_imbalance = None if not total_depth else (bid_depth - ask_depth) / total_depth
+
+        current_oi = float(oi["oi"])
+        return MarketSnapshot(
+            symbol=self.symbol,
+            price=float(ticker["last"]),
+            change_pct=((float(ticker["last"]) / float(ticker["open24h"])) - 1.0) * 100.0 if float(ticker["open24h"]) else 0.0,
+            volume=float(ticker["vol24h"]),
+            quote_volume=float(ticker["volCcy24h"]),
+            bid=float(ticker["bidPx"]),
+            ask=float(ticker["askPx"]),
+            open_interest=current_oi,
+            funding_rate=float(funding["fundingRate"]),
+            oi_change_pct=None,
+            oi_previous=None,
+            return_4h_pct=return_4h,
+            return_24h_pct=return_24h,
+            relative_volume=relative_volume,
+            bid_depth=bid_depth,
+            ask_depth=ask_depth,
+            depth_imbalance=depth_imbalance,
+        )
+
+
+class ResilientMarketAdapter:
+    """Try the primary provider, then Bybit, then OKX."""
+
+    def __init__(self, primary: Any | None = None, secondary: Any | None = None, tertiary: Any | None = None) -> None:
         self.primary = primary or BinanceMarketAdapter()
         self.secondary = secondary or BybitMarketAdapter(symbol=self.primary.symbol, timeout=self.primary.timeout)
+        self.tertiary = tertiary or OKXMarketAdapter(symbol=self.primary.symbol, timeout=self.primary.timeout)
         self.symbol = self.primary.symbol
         self.provider = self.primary.provider
 
@@ -197,9 +273,14 @@ class ResilientMarketAdapter:
             self.provider = self.primary.provider
             return snapshot
         except (requests.RequestException, OSError, ValueError, KeyError, TypeError):
-            snapshot = self.secondary.snapshot()
-            self.provider = self.secondary.provider
-            return snapshot
+            try:
+                snapshot = self.secondary.snapshot()
+                self.provider = self.secondary.provider
+                return snapshot
+            except (requests.RequestException, OSError, ValueError, KeyError, TypeError):
+                snapshot = self.tertiary.snapshot()
+                self.provider = self.tertiary.provider
+                return snapshot
 
 
 def _bounded(value: float, low: float = 0.0, high: float = 100.0) -> float:
@@ -295,7 +376,7 @@ def crypto_factor_adapters(adapter: Any):
         if failure is not None:
             return failure
         if snap.oi_change_pct is None:
-            return FactorResult("open_interest", "UNAVAILABLE", provider=getattr(adapter, "provider", "UNKNOWN"))
+            return FactorResult("open_interest", "UNAVAILABLE", provider=getattr(adapter, "provider", "UNKNOWN"), details={"reason": "historical_open_interest_unavailable"})
         score = 50.0 + snap.oi_change_pct * 5.0
         return FactorResult("open_interest", "OK", _bounded(score), 0.85, getattr(adapter, "provider", "UNKNOWN"), details={"symbol": snap.symbol, "open_interest": snap.open_interest, "previous_open_interest": snap.oi_previous, "oi_change_pct_1h": round(snap.oi_change_pct, 4)})
 
