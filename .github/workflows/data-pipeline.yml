@@ -37,6 +37,11 @@ jobs:
         run: |
           python -m iea.scheduler
 
+      - name: Run Data Health Monitor
+        if: always()
+        run: |
+          python -m iea.health_monitor
+
       - name: Run unified data health report
         if: always()
         run: |
