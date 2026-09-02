@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import os
 from dataclasses import dataclass
 from typing import Any
@@ -25,6 +26,9 @@ class MarketSnapshot:
     return_4h_pct: float | None = None
     return_24h_pct: float | None = None
     relative_volume: float | None = None
+    bid_depth: float | None = None
+    ask_depth: float | None = None
+    depth_imbalance: float | None = None
 
 
 class BinanceMarketAdapter:
@@ -42,6 +46,7 @@ class BinanceMarketAdapter:
     def snapshot(self) -> MarketSnapshot:
         ticker = self._get("/fapi/v1/ticker/24hr", {"symbol": self.symbol})
         book = self._get("/fapi/v1/ticker/bookTicker", {"symbol": self.symbol})
+        depth = self._get("/fapi/v1/depth", {"symbol": self.symbol, "limit": 20})
         oi = self._get("/fapi/v1/openInterest", {"symbol": self.symbol})
         funding = self._get("/fapi/v1/premiumIndex", {"symbol": self.symbol})
         klines = self._get(
@@ -56,6 +61,15 @@ class BinanceMarketAdapter:
         current_oi = float(oi["openInterest"])
         previous_oi = float(oi_hist[0]["sumOpenInterest"]) if oi_hist else current_oi
         oi_change = None if previous_oi == 0 else (current_oi / previous_oi - 1.0) * 100.0
+
+        bids = [(float(price), float(qty)) for price, qty in depth.get("bids", [])]
+        asks = [(float(price), float(qty)) for price, qty in depth.get("asks", [])]
+        bid_depth = sum(price * qty for price, qty in bids) if bids else None
+        ask_depth = sum(price * qty for price, qty in asks) if asks else None
+        total_depth = None if bid_depth is None or ask_depth is None else bid_depth + ask_depth
+        depth_imbalance = None
+        if total_depth and total_depth > 0:
+            depth_imbalance = (bid_depth - ask_depth) / total_depth
 
         closed = klines[:-1] if len(klines) > 1 else klines
         closes = [float(row[4]) for row in closed]
@@ -87,6 +101,9 @@ class BinanceMarketAdapter:
             return_4h_pct=return_4h,
             return_24h_pct=return_24h,
             relative_volume=relative_volume,
+            bid_depth=bid_depth,
+            ask_depth=ask_depth,
+            depth_imbalance=depth_imbalance,
         )
 
 
@@ -102,47 +119,45 @@ def crypto_factor_adapters(adapter: BinanceMarketAdapter):
         from .intelligence_v2 import FactorResult
         if snap.return_4h_pct is None or snap.return_24h_pct is None:
             return FactorResult("trend", "UNAVAILABLE", provider="BINANCE_FUTURES")
-        # Blend short and medium-term momentum; the shorter window gets more weight.
         score = 50.0 + snap.return_4h_pct * 4.0 + snap.return_24h_pct * 2.0
         return FactorResult(
-            "trend",
-            "OK",
-            _bounded(score),
-            0.9,
-            "BINANCE_FUTURES",
-            details={
-                "symbol": snap.symbol,
-                "return_4h_pct": round(snap.return_4h_pct, 4),
-                "return_24h_pct": round(snap.return_24h_pct, 4),
-            },
+            "trend", "OK", _bounded(score), 0.9, "BINANCE_FUTURES",
+            details={"symbol": snap.symbol, "return_4h_pct": round(snap.return_4h_pct, 4), "return_24h_pct": round(snap.return_24h_pct, 4)},
         )
 
     def volume(_: Any):
         from .intelligence_v2 import FactorResult
         if snap.relative_volume is None:
             return FactorResult("volume", "UNAVAILABLE", provider="BINANCE_FUTURES")
-        # Relative volume above 1 means the latest closed hour traded more than its
-        # recent hourly baseline. Combine that with price direction for confirmation.
         direction = 1.0 if snap.return_4h_pct is not None and snap.return_4h_pct > 0 else -1.0 if snap.return_4h_pct is not None and snap.return_4h_pct < 0 else 0.0
         score = 50.0 + direction * min(20.0, max(0.0, snap.relative_volume - 1.0) * 25.0)
         return FactorResult(
-            "volume",
-            "OK",
-            _bounded(score),
-            0.8,
-            "BINANCE_FUTURES",
-            details={
-                "symbol": snap.symbol,
-                "relative_volume_1h": round(snap.relative_volume, 4),
-                "price_direction_4h": direction,
-            },
+            "volume", "OK", _bounded(score), 0.8, "BINANCE_FUTURES",
+            details={"symbol": snap.symbol, "relative_volume_1h": round(snap.relative_volume, 4), "price_direction_4h": direction},
         )
 
     def liquidity(_: Any):
         from .intelligence_v2 import FactorResult
         mid = (snap.bid + snap.ask) / 2.0
         spread_bps = 0.0 if mid == 0 else (snap.ask - snap.bid) / mid * 10000.0
-        return FactorResult("liquidity", "OK", _bounded(100.0 - spread_bps * 10.0), 0.8, "BINANCE_FUTURES", details={"symbol": snap.symbol, "spread_bps": round(spread_bps, 4)})
+        spread_score = _bounded(100.0 - spread_bps * 10.0)
+        if snap.bid_depth is None or snap.ask_depth is None or snap.depth_imbalance is None:
+            return FactorResult("liquidity", "UNAVAILABLE", provider="BINANCE_FUTURES")
+        total_depth_usd = snap.bid_depth + snap.ask_depth
+        depth_score = _bounded((math.log10(max(total_depth_usd, 1.0)) - 5.0) * 20.0)
+        balance_score = _bounded(100.0 - abs(snap.depth_imbalance) * 100.0)
+        score = 0.5 * spread_score + 0.3 * depth_score + 0.2 * balance_score
+        return FactorResult(
+            "liquidity", "OK", _bounded(score), 0.9, "BINANCE_FUTURES",
+            details={
+                "symbol": snap.symbol,
+                "spread_bps": round(spread_bps, 4),
+                "bid_depth_usd": round(snap.bid_depth, 2),
+                "ask_depth_usd": round(snap.ask_depth, 2),
+                "total_depth_usd": round(total_depth_usd, 2),
+                "depth_imbalance": round(snap.depth_imbalance, 4),
+            },
+        )
 
     def open_interest(_: Any):
         from .intelligence_v2 import FactorResult
