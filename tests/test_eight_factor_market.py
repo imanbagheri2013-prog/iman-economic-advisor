@@ -22,6 +22,9 @@ class FakeMarket:
             open_interest=50000.0,
             funding_rate=0.0001,
             oi_change_pct=1.0,
+            return_4h_pct=1.5,
+            return_24h_pct=2.5,
+            relative_volume=1.8,
         )
 
 
@@ -40,6 +43,9 @@ def test_eight_factor_market_adapters_fill_five_crypto_factors(tmp_path):
         by_name = {item["name"]: item for item in report["factors"]}
         for name in ("trend", "volume", "liquidity", "open_interest", "funding_rate"):
             assert by_name[name]["status"] == "OK"
+        assert by_name["trend"]["details"]["return_4h_pct"] == 1.5
+        assert by_name["trend"]["details"]["return_24h_pct"] == 2.5
+        assert by_name["volume"]["details"]["relative_volume_1h"] == 1.8
         assert by_name["fundamental"]["status"] == "UNAVAILABLE"
         assert by_name["sentiment"]["status"] == "UNAVAILABLE"
         assert by_name["news_risk"]["status"] == "UNAVAILABLE"
