@@ -151,10 +151,43 @@ def _funding_rate_score(rate: float) -> tuple[float, str]:
 
 def crypto_factor_adapters(adapter: BinanceMarketAdapter):
     # Fetch once so all five crypto factors use the same market snapshot.
-    snap = adapter.snapshot()
+    # Provider failures are cached too, so one outage does not trigger five
+    # repeated requests or abort the complete eight-factor analysis.
+    snapshot_cache: dict[str, Any] = {"loaded": False, "snapshot": None, "error": None}
+
+    def get_snapshot() -> tuple[MarketSnapshot | None, Exception | None]:
+        if not snapshot_cache["loaded"]:
+            try:
+                snapshot_cache["snapshot"] = adapter.snapshot()
+            except (requests.RequestException, OSError, ValueError, KeyError, TypeError) as exc:
+                snapshot_cache["error"] = exc
+            snapshot_cache["loaded"] = True
+        return snapshot_cache["snapshot"], snapshot_cache["error"]
+
+    def unavailable(name: str, error: Exception):
+        from .intelligence_v2 import FactorResult
+
+        status_code = getattr(getattr(error, "response", None), "status_code", None)
+        details = {
+            "provider": "BINANCE_FUTURES",
+            "error_type": type(error).__name__,
+            "error": str(error),
+        }
+        if status_code is not None:
+            details["status_code"] = status_code
+        return FactorResult(name, "UNAVAILABLE", provider="BINANCE_FUTURES", details=details)
+
+    def snapshot_or_unavailable(name: str):
+        snap, error = get_snapshot()
+        if error is not None:
+            return None, unavailable(name, error)
+        return snap, None
 
     def trend(_: Any):
         from .intelligence_v2 import FactorResult
+        snap, failure = snapshot_or_unavailable("trend")
+        if failure is not None:
+            return failure
         if snap.return_4h_pct is None or snap.return_24h_pct is None:
             return FactorResult("trend", "UNAVAILABLE", provider="BINANCE_FUTURES")
         score = 50.0 + snap.return_4h_pct * 4.0 + snap.return_24h_pct * 2.0
@@ -165,6 +198,9 @@ def crypto_factor_adapters(adapter: BinanceMarketAdapter):
 
     def volume(_: Any):
         from .intelligence_v2 import FactorResult
+        snap, failure = snapshot_or_unavailable("volume")
+        if failure is not None:
+            return failure
         if snap.relative_volume is None:
             return FactorResult("volume", "UNAVAILABLE", provider="BINANCE_FUTURES")
         direction = 1.0 if snap.return_4h_pct is not None and snap.return_4h_pct > 0 else -1.0 if snap.return_4h_pct is not None and snap.return_4h_pct < 0 else 0.0
@@ -176,6 +212,9 @@ def crypto_factor_adapters(adapter: BinanceMarketAdapter):
 
     def liquidity(_: Any):
         from .intelligence_v2 import FactorResult
+        snap, failure = snapshot_or_unavailable("liquidity")
+        if failure is not None:
+            return failure
         mid = (snap.bid + snap.ask) / 2.0
         spread_bps = 0.0 if mid == 0 else (snap.ask - snap.bid) / mid * 10000.0
         spread_score = _bounded(100.0 - spread_bps * 10.0)
@@ -199,6 +238,9 @@ def crypto_factor_adapters(adapter: BinanceMarketAdapter):
 
     def open_interest(_: Any):
         from .intelligence_v2 import FactorResult
+        snap, failure = snapshot_or_unavailable("open_interest")
+        if failure is not None:
+            return failure
         if snap.oi_change_pct is None:
             return FactorResult("open_interest", "UNAVAILABLE", provider="BINANCE_FUTURES")
         score = 50.0 + snap.oi_change_pct * 5.0
@@ -214,6 +256,9 @@ def crypto_factor_adapters(adapter: BinanceMarketAdapter):
 
     def funding_rate(_: Any):
         from .intelligence_v2 import FactorResult
+        snap, failure = snapshot_or_unavailable("funding_rate")
+        if failure is not None:
+            return failure
         score, regime = _funding_rate_score(snap.funding_rate)
         return FactorResult(
             "funding_rate",
