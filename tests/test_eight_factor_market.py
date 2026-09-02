@@ -30,12 +30,13 @@ def test_eight_factor_market_adapters_fill_five_crypto_factors(tmp_path):
     try:
         report = analyze_eight_factor(store, FakeMarket())
         assert report["symbol"] == "BTCUSDT"
-        assert report["coverage"] == 0.75
+        assert report["coverage"] == 0.625
         assert report["score"] is not None
         assert report["regime"] in {"RISK_ON", "NEUTRAL", "RISK_OFF"}
         by_name = {item["name"]: item for item in report["factors"]}
         for name in ("trend", "volume", "liquidity", "open_interest", "funding_rate"):
             assert by_name[name]["status"] == "OK"
+        assert by_name["fundamental"]["status"] == "UNAVAILABLE"
         assert by_name["sentiment"]["status"] == "UNAVAILABLE"
         assert by_name["news_risk"]["status"] == "UNAVAILABLE"
     finally:
