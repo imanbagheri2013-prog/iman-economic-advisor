@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from pathlib import Path
 
 from iea.health_monitor import (
@@ -54,13 +55,13 @@ def test_check_data_reports_series_health(tmp_path: Path):
 
     store = Store(db_path)
     try:
-        obs = Observation.from_dict({
-            "provider": "fred",
-            "series_id": "DFF",
-            "date": "2026-08-28",
-            "value": 3.5,
-            "retrieved_at": "2026-08-28T10:00:00+00:00",
-        })
+        obs = Observation(
+            provider="fred",
+            series_id="DFF",
+            date=datetime(2026, 8, 28, tzinfo=timezone.utc),
+            value=3.5,
+            retrieved_at=datetime(2026, 8, 28, 10, tzinfo=timezone.utc),
+        )
         store.upsert(obs)
     finally:
         store.close()
