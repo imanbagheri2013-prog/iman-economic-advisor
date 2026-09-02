@@ -4,7 +4,7 @@ import pytest
 import requests
 
 from iea.eight_factor import analyze_eight_factor
-from iea.market_adapters import MarketSnapshot
+from iea.market_adapters import MarketSnapshot, ResilientMarketAdapter
 
 
 @dataclass
@@ -12,28 +12,11 @@ class FakeMarket:
     symbol: str = "BTCUSDT"
     funding_rate: float = 0.0001
     snapshot_calls: int = 0
+    provider: str = "BINANCE_FUTURES"
 
     def snapshot(self):
         self.snapshot_calls += 1
-        return MarketSnapshot(
-            symbol=self.symbol,
-            price=100000.0,
-            change_pct=2.0,
-            volume=1000.0,
-            quote_volume=100000000.0,
-            bid=99999.0,
-            ask=100001.0,
-            open_interest=50000.0,
-            funding_rate=self.funding_rate,
-            oi_change_pct=1.0,
-            oi_previous=49505.0,
-            return_4h_pct=1.5,
-            return_24h_pct=2.5,
-            relative_volume=1.8,
-            bid_depth=2_000_000.0,
-            ask_depth=1_800_000.0,
-            depth_imbalance=0.0526315789,
-        )
+        return MarketSnapshot(symbol=self.symbol, price=100000.0, change_pct=2.0, volume=1000.0, quote_volume=100000000.0, bid=99999.0, ask=100001.0, open_interest=50000.0, funding_rate=self.funding_rate, oi_change_pct=1.0, oi_previous=49505.0, return_4h_pct=1.5, return_24h_pct=2.5, relative_volume=1.8, bid_depth=2_000_000.0, ask_depth=1_800_000.0, depth_imbalance=0.0526315789)
 
 
 @dataclass
@@ -50,23 +33,40 @@ class FailingMarket:
 
 
 @dataclass
+class FailingPrimary:
+    symbol: str = "BTCUSDT"
+    timeout: float = 10.0
+    provider: str = "BINANCE_FUTURES"
+    snapshot_calls: int = 0
+
+    def snapshot(self):
+        self.snapshot_calls += 1
+        raise requests.HTTPError("451 Client Error")
+
+
+@dataclass
+class FakeSecondary:
+    symbol: str = "BTCUSDT"
+    timeout: float = 10.0
+    provider: str = "BYBIT_LINEAR"
+    snapshot_calls: int = 0
+
+    def snapshot(self):
+        self.snapshot_calls += 1
+        return FakeMarket(provider=self.provider).snapshot()
+
+
+@dataclass
 class FakeSentiment:
     value: float = 62.0
     classification: str = "Greed"
 
     def snapshot(self):
-        return {
-            "value": self.value,
-            "classification": self.classification,
-            "previous_value": 69.0,
-            "change": -7.0,
-            "timestamp": "2026-09-02T00:00:00+00:00",
-        }
+        return {"value": self.value, "classification": self.classification, "previous_value": 69.0, "change": -7.0, "timestamp": "2026-09-02T00:00:00+00:00"}
 
 
 def test_eight_factor_market_adapters_fill_six_factors(tmp_path):
     from iea.storage import Store
-
     store = Store(tmp_path / "eight.sqlite3")
     market = FakeMarket()
     try:
@@ -102,7 +102,6 @@ def test_eight_factor_market_adapters_fill_six_factors(tmp_path):
 
 def test_eight_factor_market_provider_failure_is_non_fatal(tmp_path):
     from iea.storage import Store
-
     store = Store(tmp_path / "provider_failure.sqlite3")
     market = FailingMarket()
     try:
@@ -119,17 +118,23 @@ def test_eight_factor_market_provider_failure_is_non_fatal(tmp_path):
         store.close()
 
 
+def test_resilient_market_adapter_falls_back_to_secondary():
+    primary = FailingPrimary()
+    secondary = FakeSecondary()
+    adapter = ResilientMarketAdapter(primary=primary, secondary=secondary)
+    snapshot = adapter.snapshot()
+    assert snapshot.symbol == "BTCUSDT"
+    assert primary.snapshot_calls == 1
+    assert secondary.snapshot_calls == 1
+    assert adapter.provider == "BYBIT_LINEAR"
+
+
 @pytest.mark.parametrize(
     ("funding_rate", "expected_score", "expected_regime"),
-    [
-        (0.0, 50.0, "NEUTRAL"),
-        (0.0006, 16.0, "EXTREME_LONG"),
-        (-0.0006, 84.0, "EXTREME_SHORT"),
-    ],
+    [(0.0, 50.0, "NEUTRAL"), (0.0006, 16.0, "EXTREME_LONG"), (-0.0006, 84.0, "EXTREME_SHORT")],
 )
 def test_funding_rate_crowding_extremes(tmp_path, funding_rate, expected_score, expected_regime):
     from iea.storage import Store
-
     store = Store(tmp_path / "funding.sqlite3")
     try:
         report = analyze_eight_factor(store, FakeMarket(funding_rate=funding_rate), FakeSentiment())
