@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 
 import pytest
+import requests
 
 from iea.eight_factor import analyze_eight_factor
 from iea.market_adapters import MarketSnapshot
@@ -33,6 +34,19 @@ class FakeMarket:
             ask_depth=1_800_000.0,
             depth_imbalance=0.0526315789,
         )
+
+
+@dataclass
+class FailingMarket:
+    symbol: str = "BTCUSDT"
+    snapshot_calls: int = 0
+
+    def snapshot(self):
+        self.snapshot_calls += 1
+        response = requests.Response()
+        response.status_code = 451
+        response.url = "https://fapi.binance.com/fapi/v1/ticker/24hr?symbol=BTCUSDT"
+        raise requests.HTTPError("451 Client Error: Unavailable For Legal Reasons", response=response)
 
 
 @dataclass
@@ -82,6 +96,25 @@ def test_eight_factor_market_adapters_fill_six_factors(tmp_path):
         assert by_name["sentiment"]["details"]["change_1d"] == -7.0
         assert by_name["fundamental"]["status"] == "UNAVAILABLE"
         assert by_name["news_risk"]["status"] == "UNAVAILABLE"
+    finally:
+        store.close()
+
+
+def test_eight_factor_market_provider_failure_is_non_fatal(tmp_path):
+    from iea.storage import Store
+
+    store = Store(tmp_path / "provider_failure.sqlite3")
+    market = FailingMarket()
+    try:
+        report = analyze_eight_factor(store, market, FakeSentiment())
+        assert market.snapshot_calls == 1
+        by_name = {item["name"]: item for item in report["factors"]}
+        for name in ("trend", "volume", "liquidity", "open_interest", "funding_rate"):
+            assert by_name[name]["status"] == "UNAVAILABLE"
+            assert by_name[name]["provider"] == "BINANCE_FUTURES"
+            assert by_name[name]["details"]["error_type"] == "HTTPError"
+            assert by_name[name]["details"]["status_code"] == 451
+        assert by_name["sentiment"]["status"] == "OK"
     finally:
         store.close()
 
