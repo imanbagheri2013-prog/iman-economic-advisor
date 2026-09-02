@@ -6,6 +6,7 @@ from typing import Any
 from .intelligence import analyze
 from .intelligence_v2 import FactorRegistry, FactorResult, aggregate
 from .market_adapters import BinanceMarketAdapter, crypto_factor_adapters
+from .news import GDELTNewsAdapter, news_risk_factor
 from .sentiment import AlternativeFearGreedAdapter, sentiment_factor
 
 
@@ -28,6 +29,7 @@ def analyze_eight_factor(
     store: Any,
     market_adapter: BinanceMarketAdapter | None = None,
     sentiment_adapter: AlternativeFearGreedAdapter | None = None,
+    news_adapter: GDELTNewsAdapter | None = None,
 ) -> dict[str, Any]:
     registry = FactorRegistry()
     registry.register("fundamental", _fundamental_adapter)
@@ -40,6 +42,7 @@ def analyze_eight_factor(
     registry.register("open_interest", open_interest)
     registry.register("funding_rate", funding_rate)
     registry.register("sentiment", sentiment_factor(sentiment_adapter))
+    registry.register("news_risk", news_risk_factor(news_adapter))
 
     results = registry.evaluate(store)
     summary = aggregate(results)
