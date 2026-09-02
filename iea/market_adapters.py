@@ -69,34 +69,32 @@ def _bounded(value: float, low: float = 0.0, high: float = 100.0) -> float:
 
 
 def crypto_factor_adapters(adapter: BinanceMarketAdapter):
+    # Fetch once so all five crypto factors use the same market snapshot.
+    snap = adapter.snapshot()
+
     def trend(_: Any):
         from .intelligence_v2 import FactorResult
-        snap = adapter.snapshot()
         return FactorResult("trend", "OK", _bounded(50.0 + snap.change_pct * 3.0), 0.9, "BINANCE_FUTURES", details={"symbol": snap.symbol, "change_pct": snap.change_pct})
 
     def volume(_: Any):
         from .intelligence_v2 import FactorResult
-        snap = adapter.snapshot()
         direction = 10.0 if snap.change_pct > 0 else -10.0 if snap.change_pct < 0 else 0.0
         return FactorResult("volume", "OK", _bounded(50.0 + direction), 0.75, "BINANCE_FUTURES", details={"symbol": snap.symbol, "quote_volume_24h": snap.quote_volume})
 
     def liquidity(_: Any):
         from .intelligence_v2 import FactorResult
-        snap = adapter.snapshot()
         mid = (snap.bid + snap.ask) / 2.0
         spread_bps = 0.0 if mid == 0 else (snap.ask - snap.bid) / mid * 10000.0
         return FactorResult("liquidity", "OK", _bounded(100.0 - spread_bps * 10.0), 0.8, "BINANCE_FUTURES", details={"symbol": snap.symbol, "spread_bps": round(spread_bps, 4)})
 
     def open_interest(_: Any):
         from .intelligence_v2 import FactorResult
-        snap = adapter.snapshot()
         if snap.oi_change_pct is None:
             return FactorResult("open_interest", "UNAVAILABLE", provider="BINANCE_FUTURES")
         return FactorResult("open_interest", "OK", _bounded(50.0 + snap.oi_change_pct * 5.0), 0.8, "BINANCE_FUTURES", details={"symbol": snap.symbol, "oi_change_pct_1h": snap.oi_change_pct})
 
     def funding_rate(_: Any):
         from .intelligence_v2 import FactorResult
-        snap = adapter.snapshot()
         return FactorResult("funding_rate", "OK", _bounded(50.0 - snap.funding_rate * 10000.0), 0.8, "BINANCE_FUTURES", details={"symbol": snap.symbol, "funding_rate": snap.funding_rate})
 
     return trend, volume, liquidity, open_interest, funding_rate
