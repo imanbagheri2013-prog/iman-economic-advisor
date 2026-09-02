@@ -23,6 +23,7 @@ class MarketSnapshot:
     open_interest: float
     funding_rate: float
     oi_change_pct: float | None
+    oi_previous: float | None = None
     return_4h_pct: float | None = None
     return_24h_pct: float | None = None
     relative_volume: float | None = None
@@ -59,8 +60,17 @@ class BinanceMarketAdapter:
             {"symbol": self.symbol, "period": "1h", "limit": 2},
         )
         current_oi = float(oi["openInterest"])
-        previous_oi = float(oi_hist[0]["sumOpenInterest"]) if oi_hist else current_oi
-        oi_change = None if previous_oi == 0 else (current_oi / previous_oi - 1.0) * 100.0
+        previous_oi = None
+        if isinstance(oi_hist, list):
+            valid = [row for row in oi_hist if isinstance(row, dict) and row.get("sumOpenInterest") is not None]
+            if len(valid) >= 2:
+                valid.sort(key=lambda row: int(row.get("timestamp", 0)))
+                previous_oi = float(valid[-2]["sumOpenInterest"])
+            elif valid:
+                previous_oi = float(valid[0]["sumOpenInterest"])
+        oi_change = None
+        if previous_oi is not None and previous_oi > 0:
+            oi_change = (current_oi / previous_oi - 1.0) * 100.0
 
         bids = [(float(price), float(qty)) for price, qty in depth.get("bids", [])]
         asks = [(float(price), float(qty)) for price, qty in depth.get("asks", [])]
@@ -98,6 +108,7 @@ class BinanceMarketAdapter:
             open_interest=current_oi,
             funding_rate=float(funding["lastFundingRate"]),
             oi_change_pct=oi_change,
+            oi_previous=previous_oi,
             return_4h_pct=return_4h,
             return_24h_pct=return_24h,
             relative_volume=relative_volume,
@@ -163,7 +174,16 @@ def crypto_factor_adapters(adapter: BinanceMarketAdapter):
         from .intelligence_v2 import FactorResult
         if snap.oi_change_pct is None:
             return FactorResult("open_interest", "UNAVAILABLE", provider="BINANCE_FUTURES")
-        return FactorResult("open_interest", "OK", _bounded(50.0 + snap.oi_change_pct * 5.0), 0.8, "BINANCE_FUTURES", details={"symbol": snap.symbol, "oi_change_pct_1h": snap.oi_change_pct})
+        score = 50.0 + snap.oi_change_pct * 5.0
+        return FactorResult(
+            "open_interest", "OK", _bounded(score), 0.85, "BINANCE_FUTURES",
+            details={
+                "symbol": snap.symbol,
+                "open_interest": snap.open_interest,
+                "previous_open_interest": snap.oi_previous,
+                "oi_change_pct_1h": round(snap.oi_change_pct, 4),
+            },
+        )
 
     def funding_rate(_: Any):
         from .intelligence_v2 import FactorResult
