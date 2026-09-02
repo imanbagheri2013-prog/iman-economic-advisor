@@ -7,8 +7,10 @@ from iea.market_adapters import MarketSnapshot
 @dataclass
 class FakeMarket:
     symbol: str = "BTCUSDT"
+    snapshot_calls: int = 0
 
     def snapshot(self):
+        self.snapshot_calls += 1
         return MarketSnapshot(
             symbol=self.symbol,
             price=100000.0,
@@ -27,12 +29,14 @@ def test_eight_factor_market_adapters_fill_five_crypto_factors(tmp_path):
     from iea.storage import Store
 
     store = Store(tmp_path / "eight.sqlite3")
+    market = FakeMarket()
     try:
-        report = analyze_eight_factor(store, FakeMarket())
+        report = analyze_eight_factor(store, market)
         assert report["symbol"] == "BTCUSDT"
         assert report["coverage"] == 0.625
         assert report["score"] is not None
         assert report["regime"] in {"RISK_ON", "NEUTRAL", "RISK_OFF"}
+        assert market.snapshot_calls == 1
         by_name = {item["name"]: item for item in report["factors"]}
         for name in ("trend", "volume", "liquidity", "open_interest", "funding_rate"):
             assert by_name[name]["status"] == "OK"
