@@ -22,6 +22,7 @@ class FakeMarket:
             open_interest=50000.0,
             funding_rate=0.0001,
             oi_change_pct=1.0,
+            oi_previous=49505.0,
             return_4h_pct=1.5,
             return_24h_pct=2.5,
             relative_volume=1.8,
@@ -52,6 +53,9 @@ def test_eight_factor_market_adapters_fill_five_crypto_factors(tmp_path):
         assert by_name["liquidity"]["details"]["bid_depth_usd"] == 2_000_000.0
         assert by_name["liquidity"]["details"]["ask_depth_usd"] == 1_800_000.0
         assert by_name["liquidity"]["details"]["depth_imbalance"] == 0.0526
+        assert by_name["open_interest"]["details"]["open_interest"] == 50000.0
+        assert by_name["open_interest"]["details"]["previous_open_interest"] == 49505.0
+        assert by_name["open_interest"]["details"]["oi_change_pct_1h"] == 1.0
         assert by_name["fundamental"]["status"] == "UNAVAILABLE"
         assert by_name["sentiment"]["status"] == "UNAVAILABLE"
         assert by_name["news_risk"]["status"] == "UNAVAILABLE"
