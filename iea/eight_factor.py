@@ -5,7 +5,7 @@ from typing import Any
 
 from .intelligence import analyze
 from .intelligence_v2 import FactorRegistry, FactorResult, aggregate
-from .market_adapters import BinanceMarketAdapter, crypto_factor_adapters
+from .market_adapters import ResilientMarketAdapter, crypto_factor_adapters
 from .news import GDELTNewsAdapter, news_risk_factor
 from .sentiment import AlternativeFearGreedAdapter, sentiment_factor
 
@@ -27,14 +27,14 @@ def _fundamental_adapter(store: Any) -> FactorResult:
 
 def analyze_eight_factor(
     store: Any,
-    market_adapter: BinanceMarketAdapter | None = None,
+    market_adapter: Any | None = None,
     sentiment_adapter: AlternativeFearGreedAdapter | None = None,
     news_adapter: GDELTNewsAdapter | None = None,
 ) -> dict[str, Any]:
     registry = FactorRegistry()
     registry.register("fundamental", _fundamental_adapter)
 
-    market = market_adapter or BinanceMarketAdapter()
+    market = market_adapter or ResilientMarketAdapter()
     trend, volume, liquidity, open_interest, funding_rate = crypto_factor_adapters(market)
     registry.register("trend", trend)
     registry.register("volume", volume)
