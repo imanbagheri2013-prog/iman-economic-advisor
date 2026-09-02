@@ -91,7 +91,7 @@ def main() -> int:
         )
     )
 
-    return 0 if report["status"] == "critical" else 0
+    return 0
 
 
 if __name__ == "__main__":
