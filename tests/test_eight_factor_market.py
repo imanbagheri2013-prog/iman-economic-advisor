@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 
+import pytest
+
 from iea.eight_factor import analyze_eight_factor
 from iea.market_adapters import MarketSnapshot
 
@@ -7,6 +9,7 @@ from iea.market_adapters import MarketSnapshot
 @dataclass
 class FakeMarket:
     symbol: str = "BTCUSDT"
+    funding_rate: float = 0.0001
     snapshot_calls: int = 0
 
     def snapshot(self):
@@ -20,7 +23,7 @@ class FakeMarket:
             bid=99999.0,
             ask=100001.0,
             open_interest=50000.0,
-            funding_rate=0.0001,
+            funding_rate=self.funding_rate,
             oi_change_pct=1.0,
             oi_previous=49505.0,
             return_4h_pct=1.5,
@@ -56,8 +59,32 @@ def test_eight_factor_market_adapters_fill_five_crypto_factors(tmp_path):
         assert by_name["open_interest"]["details"]["open_interest"] == 50000.0
         assert by_name["open_interest"]["details"]["previous_open_interest"] == 49505.0
         assert by_name["open_interest"]["details"]["oi_change_pct_1h"] == 1.0
+        assert by_name["funding_rate"]["details"]["funding_rate_pct"] == 0.01
+        assert by_name["funding_rate"]["details"]["funding_regime"] == "LONG_CROWDED"
+        assert by_name["funding_rate"]["score"] == 46.67
         assert by_name["fundamental"]["status"] == "UNAVAILABLE"
         assert by_name["sentiment"]["status"] == "UNAVAILABLE"
         assert by_name["news_risk"]["status"] == "UNAVAILABLE"
+    finally:
+        store.close()
+
+
+@pytest.mark.parametrize(
+    ("funding_rate", "expected_score", "expected_regime"),
+    [
+        (0.0, 50.0, "NEUTRAL"),
+        (0.0006, 16.0, "EXTREME_LONG"),
+        (-0.0006, 84.0, "EXTREME_SHORT"),
+    ],
+)
+def test_funding_rate_crowding_extremes(tmp_path, funding_rate, expected_score, expected_regime):
+    from iea.storage import Store
+
+    store = Store(tmp_path / "funding.sqlite3")
+    try:
+        report = analyze_eight_factor(store, FakeMarket(funding_rate=funding_rate))
+        funding = next(item for item in report["factors"] if item["name"] == "funding_rate")
+        assert funding["score"] == expected_score
+        assert funding["details"]["funding_regime"] == expected_regime
     finally:
         store.close()
