@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .data_freshness import check_table_freshness
-from .health_monitor import check_database
+from .health_monitor import build_health_report
 
 
 DEFAULT_DB = Path(os.getenv("IEA_DB_PATH", "data/iea.sqlite3"))
@@ -20,8 +20,9 @@ def _utc_now() -> str:
 
 def build_full_health_report(
     db_path: str | Path = DEFAULT_DB,
+    registry_path: str | Path = "config/series.yaml",
 ) -> dict:
-    database = check_database(db_path)
+    monitor = build_health_report(db_path, registry_path)
 
     freshness = check_table_freshness(
         db_path=db_path,
@@ -30,21 +31,12 @@ def build_full_health_report(
         max_age_hours=48,
     )
 
-    checks = {
-        "database": database,
-        "freshness": freshness,
-    }
+    monitor_status = monitor.get("status", "CRITICAL").lower()
+    freshness_status = freshness.get("status", "critical").lower()
 
-    statuses = {
-        database.get("status"),
-        freshness.get("status"),
-    }
-
-    if "critical" in statuses:
+    if "critical" in {monitor_status, freshness_status}:
         overall_status = "critical"
-    elif "stale" in statuses:
-        overall_status = "stale"
-    elif "warning" in statuses:
+    elif "warning" in {monitor_status, freshness_status} or "stale" in {monitor_status, freshness_status}:
         overall_status = "warning"
     else:
         overall_status = "ok"
@@ -54,7 +46,11 @@ def build_full_health_report(
         "component": "data-health",
         "checked_at": _utc_now(),
         "status": overall_status,
-        "checks": checks,
+        "checks": {
+            "database": monitor["database"],
+            "data": monitor["data"],
+            "freshness": freshness,
+        },
     }
 
 
