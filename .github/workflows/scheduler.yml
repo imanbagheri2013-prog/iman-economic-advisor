@@ -2,6 +2,9 @@ name: IEA Scheduler
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
   schedule:
     - cron: "0 */6 * * *"
 
@@ -11,10 +14,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -22,6 +25,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          pip install -e .
 
       - name: Run economic data scheduler
         env:
@@ -30,3 +34,11 @@ jobs:
           BLS_END_YEAR: "2026"
           IEA_DB_PATH: "data/iea.sqlite3"
         run: python -m iea.scheduler
+
+      - name: Upload health report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scheduler-health-report
+          path: health_report.json
+          if-no-files-found: warn
