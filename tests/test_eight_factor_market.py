@@ -35,20 +35,35 @@ class FakeMarket:
         )
 
 
-def test_eight_factor_market_adapters_fill_five_crypto_factors(tmp_path):
+@dataclass
+class FakeSentiment:
+    value: float = 62.0
+    classification: str = "Greed"
+
+    def snapshot(self):
+        return {
+            "value": self.value,
+            "classification": self.classification,
+            "previous_value": 69.0,
+            "change": -7.0,
+            "timestamp": "2026-09-02T00:00:00+00:00",
+        }
+
+
+def test_eight_factor_market_adapters_fill_six_factors(tmp_path):
     from iea.storage import Store
 
     store = Store(tmp_path / "eight.sqlite3")
     market = FakeMarket()
     try:
-        report = analyze_eight_factor(store, market)
+        report = analyze_eight_factor(store, market, FakeSentiment())
         assert report["symbol"] == "BTCUSDT"
-        assert report["coverage"] == 0.625
+        assert report["coverage"] == 0.75
         assert report["score"] is not None
         assert report["regime"] in {"RISK_ON", "NEUTRAL", "RISK_OFF"}
         assert market.snapshot_calls == 1
         by_name = {item["name"]: item for item in report["factors"]}
-        for name in ("trend", "volume", "liquidity", "open_interest", "funding_rate"):
+        for name in ("trend", "volume", "liquidity", "open_interest", "funding_rate", "sentiment"):
             assert by_name[name]["status"] == "OK"
         assert by_name["trend"]["details"]["return_4h_pct"] == 1.5
         assert by_name["trend"]["details"]["return_24h_pct"] == 2.5
@@ -62,8 +77,10 @@ def test_eight_factor_market_adapters_fill_five_crypto_factors(tmp_path):
         assert by_name["funding_rate"]["details"]["funding_rate_pct"] == 0.01
         assert by_name["funding_rate"]["details"]["funding_regime"] == "LONG_CROWDED"
         assert by_name["funding_rate"]["score"] == 46.67
+        assert by_name["sentiment"]["details"]["value"] == 62.0
+        assert by_name["sentiment"]["details"]["classification"] == "Greed"
+        assert by_name["sentiment"]["details"]["change_1d"] == -7.0
         assert by_name["fundamental"]["status"] == "UNAVAILABLE"
-        assert by_name["sentiment"]["status"] == "UNAVAILABLE"
         assert by_name["news_risk"]["status"] == "UNAVAILABLE"
     finally:
         store.close()
@@ -82,7 +99,7 @@ def test_funding_rate_crowding_extremes(tmp_path, funding_rate, expected_score, 
 
     store = Store(tmp_path / "funding.sqlite3")
     try:
-        report = analyze_eight_factor(store, FakeMarket(funding_rate=funding_rate))
+        report = analyze_eight_factor(store, FakeMarket(funding_rate=funding_rate), FakeSentiment())
         funding = next(item for item in report["factors"] if item["name"] == "funding_rate")
         assert funding["score"] == expected_score
         assert funding["details"]["funding_regime"] == expected_regime
