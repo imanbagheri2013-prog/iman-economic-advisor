@@ -57,7 +57,7 @@ def test_news_risk_factor_scores_headline_risk():
     assert result.score < 100.0
     assert result.details["article_count"] == 2
     assert result.details["risk_score"] > 0
-    assert result.details["risk_regime"] == "LOW_RISK"
+    assert result.details["risk_regime"] == "ELEVATED_RISK"
     assert result.details["top_risk_headlines"][0]["title"].startswith("Major crypto exchange")
 
 
