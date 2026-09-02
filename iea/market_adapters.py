@@ -22,6 +22,9 @@ class MarketSnapshot:
     open_interest: float
     funding_rate: float
     oi_change_pct: float | None
+    return_4h_pct: float | None = None
+    return_24h_pct: float | None = None
+    relative_volume: float | None = None
 
 
 class BinanceMarketAdapter:
@@ -41,6 +44,10 @@ class BinanceMarketAdapter:
         book = self._get("/fapi/v1/ticker/bookTicker", {"symbol": self.symbol})
         oi = self._get("/fapi/v1/openInterest", {"symbol": self.symbol})
         funding = self._get("/fapi/v1/premiumIndex", {"symbol": self.symbol})
+        klines = self._get(
+            "/fapi/v1/klines",
+            {"symbol": self.symbol, "interval": "1h", "limit": 26},
+        )
 
         oi_hist = self._get(
             "/futures/data/openInterestHist",
@@ -49,6 +56,22 @@ class BinanceMarketAdapter:
         current_oi = float(oi["openInterest"])
         previous_oi = float(oi_hist[0]["sumOpenInterest"]) if oi_hist else current_oi
         oi_change = None if previous_oi == 0 else (current_oi / previous_oi - 1.0) * 100.0
+
+        closed = klines[:-1] if len(klines) > 1 else klines
+        closes = [float(row[4]) for row in closed]
+        volumes = [float(row[5]) for row in closed]
+
+        return_4h = None
+        return_24h = None
+        relative_volume = None
+        if len(closes) >= 5 and closes[-5] != 0:
+            return_4h = (closes[-1] / closes[-5] - 1.0) * 100.0
+        if len(closes) >= 25 and closes[-25] != 0:
+            return_24h = (closes[-1] / closes[-25] - 1.0) * 100.0
+        if len(volumes) >= 25:
+            baseline = sum(volumes[-25:-1]) / 24.0
+            if baseline > 0:
+                relative_volume = volumes[-1] / baseline
 
         return MarketSnapshot(
             symbol=self.symbol,
@@ -61,6 +84,9 @@ class BinanceMarketAdapter:
             open_interest=current_oi,
             funding_rate=float(funding["lastFundingRate"]),
             oi_change_pct=oi_change,
+            return_4h_pct=return_4h,
+            return_24h_pct=return_24h,
+            relative_volume=relative_volume,
         )
 
 
@@ -74,12 +100,43 @@ def crypto_factor_adapters(adapter: BinanceMarketAdapter):
 
     def trend(_: Any):
         from .intelligence_v2 import FactorResult
-        return FactorResult("trend", "OK", _bounded(50.0 + snap.change_pct * 3.0), 0.9, "BINANCE_FUTURES", details={"symbol": snap.symbol, "change_pct": snap.change_pct})
+        if snap.return_4h_pct is None or snap.return_24h_pct is None:
+            return FactorResult("trend", "UNAVAILABLE", provider="BINANCE_FUTURES")
+        # Blend short and medium-term momentum; the shorter window gets more weight.
+        score = 50.0 + snap.return_4h_pct * 4.0 + snap.return_24h_pct * 2.0
+        return FactorResult(
+            "trend",
+            "OK",
+            _bounded(score),
+            0.9,
+            "BINANCE_FUTURES",
+            details={
+                "symbol": snap.symbol,
+                "return_4h_pct": round(snap.return_4h_pct, 4),
+                "return_24h_pct": round(snap.return_24h_pct, 4),
+            },
+        )
 
     def volume(_: Any):
         from .intelligence_v2 import FactorResult
-        direction = 10.0 if snap.change_pct > 0 else -10.0 if snap.change_pct < 0 else 0.0
-        return FactorResult("volume", "OK", _bounded(50.0 + direction), 0.75, "BINANCE_FUTURES", details={"symbol": snap.symbol, "quote_volume_24h": snap.quote_volume})
+        if snap.relative_volume is None:
+            return FactorResult("volume", "UNAVAILABLE", provider="BINANCE_FUTURES")
+        # Relative volume above 1 means the latest closed hour traded more than its
+        # recent hourly baseline. Combine that with price direction for confirmation.
+        direction = 1.0 if snap.return_4h_pct is not None and snap.return_4h_pct > 0 else -1.0 if snap.return_4h_pct is not None and snap.return_4h_pct < 0 else 0.0
+        score = 50.0 + direction * min(20.0, max(0.0, snap.relative_volume - 1.0) * 25.0)
+        return FactorResult(
+            "volume",
+            "OK",
+            _bounded(score),
+            0.8,
+            "BINANCE_FUTURES",
+            details={
+                "symbol": snap.symbol,
+                "relative_volume_1h": round(snap.relative_volume, 4),
+                "price_direction_4h": direction,
+            },
+        )
 
     def liquidity(_: Any):
         from .intelligence_v2 import FactorResult
