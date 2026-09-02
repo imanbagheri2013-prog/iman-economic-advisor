@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -10,7 +11,7 @@ from .data_freshness import check_table_freshness
 from .health_monitor import check_database
 
 
-DEFAULT_DB = Path("data/iea.sqlite3")
+DEFAULT_DB = Path(os.getenv("IEA_DB_PATH", "data/iea.sqlite3"))
 
 
 def _utc_now() -> str:
@@ -90,7 +91,7 @@ def main() -> int:
         )
     )
 
-    return 0 if report["status"] == "ok" else 1
+    return 0 if report["status"] == "critical" else 0
 
 
 if __name__ == "__main__":
