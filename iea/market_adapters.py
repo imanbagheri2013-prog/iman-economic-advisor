@@ -122,6 +122,33 @@ def _bounded(value: float, low: float = 0.0, high: float = 100.0) -> float:
     return round(max(low, min(high, value)), 2)
 
 
+def _funding_rate_score(rate: float) -> tuple[float, str]:
+    """Score funding as a contrarian crowding signal.
+
+    Positive funding means longs pay shorts and is treated as bearish crowding;
+    negative funding means shorts pay longs and is treated as bullish crowding.
+    The piecewise scale is intentionally bounded and less sensitive to tiny
+    rate changes than the previous linear formula.
+    """
+    magnitude = abs(rate)
+    if magnitude <= 0.00005:
+        score = 50.0
+        regime = "NEUTRAL"
+    elif magnitude <= 0.00020:
+        score = 50.0 - (magnitude - 0.00005) / 0.00015 * 10.0
+        regime = "LONG_CROWDED" if rate > 0 else "SHORT_CROWDED"
+    elif magnitude <= 0.00050:
+        score = 40.0 - (magnitude - 0.00020) / 0.00030 * 20.0
+        regime = "LONG_CROWDED" if rate > 0 else "SHORT_CROWDED"
+    else:
+        score = max(0.0, 20.0 - (magnitude - 0.00050) / 0.00050 * 20.0)
+        regime = "EXTREME_LONG" if rate > 0 else "EXTREME_SHORT"
+
+    if rate < 0:
+        score = 100.0 - score
+    return _bounded(score), regime
+
+
 def crypto_factor_adapters(adapter: BinanceMarketAdapter):
     # Fetch once so all five crypto factors use the same market snapshot.
     snap = adapter.snapshot()
@@ -187,6 +214,19 @@ def crypto_factor_adapters(adapter: BinanceMarketAdapter):
 
     def funding_rate(_: Any):
         from .intelligence_v2 import FactorResult
-        return FactorResult("funding_rate", "OK", _bounded(50.0 - snap.funding_rate * 10000.0), 0.8, "BINANCE_FUTURES", details={"symbol": snap.symbol, "funding_rate": snap.funding_rate})
+        score, regime = _funding_rate_score(snap.funding_rate)
+        return FactorResult(
+            "funding_rate",
+            "OK",
+            score,
+            0.85,
+            "BINANCE_FUTURES",
+            details={
+                "symbol": snap.symbol,
+                "funding_rate": snap.funding_rate,
+                "funding_rate_pct": round(snap.funding_rate * 100.0, 6),
+                "funding_regime": regime,
+            },
+        )
 
     return trend, volume, liquidity, open_interest, funding_rate
