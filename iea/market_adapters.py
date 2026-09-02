@@ -208,14 +208,36 @@ class OKXMarketAdapter:
             raise ValueError(f"OKX API error: {payload.get('code') if isinstance(payload, dict) else 'invalid_payload'}")
         return payload
 
+    @staticmethod
+    def _parse_oi_history(rows: Any) -> list[tuple[int, float]]:
+        parsed: list[tuple[int, float]] = []
+        if not isinstance(rows, list):
+            return parsed
+        for row in rows:
+            try:
+                if isinstance(row, dict):
+                    ts = int(row.get("ts", row.get("timestamp", 0)))
+                    value = row.get("oi", row.get("openInterest"))
+                elif isinstance(row, (list, tuple)) and len(row) >= 2:
+                    ts = int(row[0])
+                    value = row[1]
+                else:
+                    continue
+                if ts and value is not None:
+                    parsed.append((ts, float(value)))
+            except (TypeError, ValueError):
+                continue
+        parsed.sort(key=lambda item: item[0])
+        return parsed
+
     def snapshot(self) -> MarketSnapshot:
         ticker = self._get("/api/v5/market/ticker", {"instId": self.inst_id})["data"][0]
         book = self._get("/api/v5/market/books", {"instId": self.inst_id, "sz": "20"})["data"][0]
         funding = self._get("/api/v5/public/funding-rate", {"instId": self.inst_id})["data"][0]
         oi = self._get("/api/v5/public/open-interest", {"instType": "SWAP", "instId": self.inst_id})["data"][0]
         candles = self._get("/api/v5/market/candles", {"instId": self.inst_id, "bar": "1H", "limit": "26"})["data"]
+        oi_history = self._get("/api/v5/rubik/stat/contracts/open-interest-history", {"instId": self.inst_id, "period": "1H", "limit": "2"})["data"]
 
-        # OKX returns candles newest-first; exclude the current unfinished candle.
         candles = list(reversed(candles))
         closed = candles[:-1] if len(candles) > 1 else candles
         closes = [float(row[4]) for row in closed]
@@ -236,6 +258,10 @@ class OKXMarketAdapter:
         depth_imbalance = None if not total_depth else (bid_depth - ask_depth) / total_depth
 
         current_oi = float(oi["oi"])
+        parsed_oi = self._parse_oi_history(oi_history)
+        previous_oi = parsed_oi[-2][1] if len(parsed_oi) >= 2 else None
+        oi_change = None if previous_oi is None or previous_oi <= 0 else (current_oi / previous_oi - 1.0) * 100.0
+
         return MarketSnapshot(
             symbol=self.symbol,
             price=float(ticker["last"]),
@@ -246,8 +272,8 @@ class OKXMarketAdapter:
             ask=float(ticker["askPx"]),
             open_interest=current_oi,
             funding_rate=float(funding["fundingRate"]),
-            oi_change_pct=None,
-            oi_previous=None,
+            oi_change_pct=oi_change,
+            oi_previous=previous_oi,
             return_4h_pct=return_4h,
             return_24h_pct=return_24h,
             relative_volume=relative_volume,
