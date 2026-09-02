@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .health import check_all, overall_status
+from .intelligence import analyze
 from .pipeline import pull_and_check
 
 
@@ -26,6 +27,7 @@ def run() -> int:
         store, freshness_results, pipeline_status = pull_and_check()
         health_results = check_all(store)
         health_status = overall_status(health_results)
+        intelligence = analyze(store)
 
         if pipeline_status != "OK":
             status = "error"
@@ -47,6 +49,7 @@ def run() -> int:
             "database": str(store.path),
             "freshness": freshness_results,
             "health": health_results,
+            "intelligence": intelligence,
         }
         _save_report(payload)
         print(json.dumps(payload, default=str, ensure_ascii=False, indent=2))
