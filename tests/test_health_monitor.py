@@ -61,6 +61,7 @@ def test_check_data_reports_series_health(tmp_path: Path):
             date=datetime(2026, 8, 28, tzinfo=timezone.utc),
             value=3.5,
             retrieved_at=datetime(2026, 8, 28, 10, tzinfo=timezone.utc),
+            quality=100.0,
         )
         store.upsert(obs)
     finally:
