@@ -73,7 +73,7 @@ def aggregate(results: list[FactorResult], minimum_coverage: float = 0.5) -> dic
         return {
             "score": None,
             "regime": "INSUFFICIENT_DATA",
-            "coverage": round(coverage, 2),
+            "coverage": round(coverage, 3),
         }
 
     score = round(sum(r.score for r in available) / len(available), 2)
@@ -83,4 +83,4 @@ def aggregate(results: list[FactorResult], minimum_coverage: float = 0.5) -> dic
         regime = "RISK_OFF"
     else:
         regime = "NEUTRAL"
-    return {"score": score, "regime": regime, "coverage": round(coverage, 2)}
+    return {"score": score, "regime": regime, "coverage": round(coverage, 3)}
