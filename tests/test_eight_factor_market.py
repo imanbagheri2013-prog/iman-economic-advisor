@@ -25,6 +25,9 @@ class FakeMarket:
             return_4h_pct=1.5,
             return_24h_pct=2.5,
             relative_volume=1.8,
+            bid_depth=2_000_000.0,
+            ask_depth=1_800_000.0,
+            depth_imbalance=0.0526315789,
         )
 
 
@@ -46,6 +49,9 @@ def test_eight_factor_market_adapters_fill_five_crypto_factors(tmp_path):
         assert by_name["trend"]["details"]["return_4h_pct"] == 1.5
         assert by_name["trend"]["details"]["return_24h_pct"] == 2.5
         assert by_name["volume"]["details"]["relative_volume_1h"] == 1.8
+        assert by_name["liquidity"]["details"]["bid_depth_usd"] == 2_000_000.0
+        assert by_name["liquidity"]["details"]["ask_depth_usd"] == 1_800_000.0
+        assert by_name["liquidity"]["details"]["depth_imbalance"] == 0.0526
         assert by_name["fundamental"]["status"] == "UNAVAILABLE"
         assert by_name["sentiment"]["status"] == "UNAVAILABLE"
         assert by_name["news_risk"]["status"] == "UNAVAILABLE"
