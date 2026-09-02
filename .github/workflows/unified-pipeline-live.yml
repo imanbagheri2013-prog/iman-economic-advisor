@@ -38,7 +38,7 @@ jobs:
           store = pull()
 
           try:
-              rows = store.conn.execute(
+              rows = store.con.execute(
                   "SELECT provider, COUNT(*) FROM observations GROUP BY provider"
               ).fetchall()
           finally:
