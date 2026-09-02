@@ -114,9 +114,11 @@ def news_risk_factor(adapter: GDELTNewsAdapter | None = None):
         risk_score = round(sum(risks) / len(risks), 2) if risks else 0.0
         market_score = round(100.0 - risk_score, 2)
 
-        if risk_score >= 60:
+        # A single high-risk headline among otherwise normal news should still
+        # register as elevated, while repeated/severe risk signals become high.
+        if risk_score >= 50:
             regime = "HIGH_RISK"
-        elif risk_score >= 30:
+        elif risk_score >= 20:
             regime = "ELEVATED_RISK"
         else:
             regime = "LOW_RISK"
