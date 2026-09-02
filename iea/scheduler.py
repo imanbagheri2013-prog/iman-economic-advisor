@@ -2,9 +2,20 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
+from pathlib import Path
 
 from .health import check_all, overall_status
 from .pipeline import pull_and_check
+
+
+REPORT_PATH = Path("health_report.json")
+
+
+def _save_report(payload: dict) -> None:
+    REPORT_PATH.write_text(
+        json.dumps(payload, default=str, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
 
 
 def run() -> int:
@@ -15,7 +26,16 @@ def run() -> int:
         store, freshness_results, pipeline_status = pull_and_check()
         health_results = check_all(store)
         health_status = overall_status(health_results)
-        status = "ok" if pipeline_status == "OK" and health_status == "HEALTHY" else "warning"
+
+        if pipeline_status != "OK":
+            status = "error"
+            exit_code = 1
+        elif health_status == "HEALTHY":
+            status = "ok"
+            exit_code = 0
+        else:
+            status = "warning"
+            exit_code = 0
 
         payload = {
             "started_at": started,
@@ -28,8 +48,9 @@ def run() -> int:
             "freshness": freshness_results,
             "health": health_results,
         }
-        print(json.dumps(payload, default=str, indent=2))
-        return 0 if status == "ok" else 1
+        _save_report(payload)
+        print(json.dumps(payload, default=str, ensure_ascii=False, indent=2))
+        return exit_code
     except Exception as exc:
         payload = {
             "started_at": started,
@@ -37,7 +58,8 @@ def run() -> int:
             "status": "error",
             "error_type": type(exc).__name__,
         }
-        print(json.dumps(payload, indent=2))
+        _save_report(payload)
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
         return 1
     finally:
         if store is not None:
