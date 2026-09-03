@@ -40,9 +40,17 @@ _FACTOR_REQUIRED_FIELDS = {
     "sentiment": ("value", "classification"),
 }
 
+_FACTOR_SAMPLE_TARGETS = {
+    "trend": 25,
+    "volume": 25,
+    "liquidity": 20,
+    "open_interest": 2,
+    "funding_rate": 1,
+}
+
 
 def _dynamic_confidence(result: FactorResult) -> float:
-    """Derive factor confidence from provider, freshness, and data completeness."""
+    """Derive factor confidence from provider, freshness, completeness, and sample depth."""
     if result.status != "OK":
         return 0.0
 
@@ -62,6 +70,10 @@ def _dynamic_confidence(result: FactorResult) -> float:
     if required:
         present = sum(details.get(field) is not None for field in required)
         quality_signals.append(sample_confidence(present, target=len(required)))
+
+    sample_target = _FACTOR_SAMPLE_TARGETS.get(result.name)
+    if sample_target is not None and "sample_count" in details:
+        quality_signals.append(sample_confidence(details["sample_count"], target=sample_target))
 
     if "coverage" in details:
         quality_signals.append(coverage_confidence(details["coverage"]))
