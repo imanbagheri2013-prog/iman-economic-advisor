@@ -68,12 +68,19 @@ class FactorRegistry:
 
 def aggregate(results: list[FactorResult], minimum_coverage: float = 0.5) -> dict[str, Any]:
     available = [r for r in results if r.score is not None and r.status == "OK"]
+    unavailable = [r.name for r in results if r not in available]
     coverage = len(available) / len(FACTOR_NAMES)
+    base = {
+        "coverage": round(coverage, 3),
+        "available_factors": [r.name for r in available],
+        "unavailable_factors": unavailable,
+    }
+
     if not available or coverage < minimum_coverage:
         return {
             "score": None,
             "regime": "INSUFFICIENT_DATA",
-            "coverage": round(coverage, 3),
+            **base,
         }
 
     score = round(sum(r.score for r in available) / len(available), 2)
@@ -83,4 +90,4 @@ def aggregate(results: list[FactorResult], minimum_coverage: float = 0.5) -> dic
         regime = "RISK_OFF"
     else:
         regime = "NEUTRAL"
-    return {"score": score, "regime": regime, "coverage": round(coverage, 3)}
+    return {"score": score, "regime": regime, **base}
