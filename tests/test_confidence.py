@@ -1,5 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from iea.confidence import clamp_confidence, combine_confidence, coverage_confidence, freshness_confidence, sample_confidence
 
 
@@ -11,7 +13,7 @@ def test_clamp_confidence_bounds_values():
 
 def test_freshness_confidence_decays_with_age():
     now = datetime.now(timezone.utc)
-    assert freshness_confidence(now.isoformat(), max_age_hours=24) == 1.0
+    assert freshness_confidence(now.isoformat(), max_age_hours=24) == pytest.approx(1.0)
     halfway = (now - timedelta(hours=12)).isoformat()
     assert 0.49 <= freshness_confidence(halfway, max_age_hours=24) <= 0.51
     old = (now - timedelta(hours=48)).isoformat()
