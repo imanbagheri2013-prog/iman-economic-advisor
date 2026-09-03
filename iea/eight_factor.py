@@ -132,11 +132,13 @@ def analyze_eight_factor(
         for result in raw_results
     ]
     summary = aggregate(results)
+    factor_dicts = [result.as_dict() for result in results]
+    decision = build_decision({**summary, "factors": factor_dicts})
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "engine": "eight_factor_market_intelligence_v2",
         "symbol": market.symbol,
         **summary,
-        "decision": build_decision(summary),
-        "factors": [result.as_dict() for result in results],
+        "decision": decision,
+        "factors": factor_dicts,
     }
