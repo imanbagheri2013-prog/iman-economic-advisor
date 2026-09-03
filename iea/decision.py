@@ -6,6 +6,16 @@ from typing import Any
 _ACTIONS = ("BUY_BIAS", "HOLD", "SELL_BIAS", "NO_TRADE")
 
 
+def _risk_tier(risk_score: int) -> str:
+    if risk_score >= 60:
+        return "CRITICAL"
+    if risk_score >= 40:
+        return "HIGH"
+    if risk_score >= 20:
+        return "MODERATE"
+    return "LOW"
+
+
 def _risk_assessment(report: dict[str, Any]) -> tuple[int, list[str]]:
     """Score execution risk from factor availability and adverse market conditions."""
     risk_score = 0
@@ -72,9 +82,13 @@ def build_decision(report: dict[str, Any]) -> dict[str, Any]:
     coverage = float(report.get("coverage") or 0.0)
     regime = report.get("regime")
     risk_score, risk_flags = _risk_assessment(report)
+    risk_tier = _risk_tier(risk_score)
+    risk_multiplier = round(1.0 - risk_score / 100.0, 3)
 
     base = {
         "risk_score": risk_score,
+        "risk_tier": risk_tier,
+        "risk_multiplier": risk_multiplier,
         "risk_flags": risk_flags,
     }
 
@@ -98,7 +112,7 @@ def build_decision(report: dict[str, Any]) -> dict[str, Any]:
     if regime == "RISK_ON" and score_value >= 62.5:
         distance = min(1.0, (score_value - 62.5) / 37.5)
         conviction = round(0.5 + 0.5 * distance, 3)
-        conviction = round(conviction * (1.0 - risk_score / 100.0), 3)
+        conviction = round(conviction * risk_multiplier, 3)
         return {
             **base,
             "action": "BUY_BIAS",
@@ -109,7 +123,7 @@ def build_decision(report: dict[str, Any]) -> dict[str, Any]:
     if regime == "RISK_OFF" and score_value <= 37.5:
         distance = min(1.0, (37.5 - score_value) / 37.5)
         conviction = round(0.5 + 0.5 * distance, 3)
-        conviction = round(conviction * (1.0 - risk_score / 100.0), 3)
+        conviction = round(conviction * risk_multiplier, 3)
         return {
             **base,
             "action": "SELL_BIAS",
@@ -120,6 +134,6 @@ def build_decision(report: dict[str, Any]) -> dict[str, Any]:
     return {
         **base,
         "action": "HOLD",
-        "conviction": round(0.5 * (1.0 - risk_score / 100.0), 3),
+        "conviction": round(0.5 * risk_multiplier, 3),
         "reason": "aggregate factors do not provide a decisive directional regime",
     }
