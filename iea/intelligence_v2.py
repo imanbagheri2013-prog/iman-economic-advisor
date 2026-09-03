@@ -93,7 +93,7 @@ def aggregate(results: list[FactorResult], minimum_coverage: float = 0.5) -> dic
             **base,
         }
 
-    weighted = [(r.score, _confidence_weight(r)) for r in available]
+    weighted = [(r, _confidence_weight(r)) for r in available]
     total_weight = sum(weight for _, weight in weighted)
     if total_weight <= 0:
         return {
@@ -102,11 +102,25 @@ def aggregate(results: list[FactorResult], minimum_coverage: float = 0.5) -> dic
             **base,
         }
 
-    score = round(sum(score * weight for score, weight in weighted) / total_weight, 2)
+    factor_weights = {
+        result.name: round(weight / total_weight, 3)
+        for result, weight in weighted
+    }
+    contributions = {
+        result.name: round(result.score * weight / total_weight, 2)
+        for result, weight in weighted
+    }
+    score = round(sum(contributions.values()), 2)
     if score >= 62.5:
         regime = "RISK_ON"
     elif score <= 37.5:
         regime = "RISK_OFF"
     else:
         regime = "NEUTRAL"
-    return {"score": score, "regime": regime, **base}
+    return {
+        "score": score,
+        "regime": regime,
+        "factor_weights": factor_weights,
+        "factor_contributions": contributions,
+        **base,
+    }
