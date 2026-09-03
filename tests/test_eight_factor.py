@@ -25,10 +25,22 @@ def test_aggregate_requires_minimum_coverage():
         *[FactorResult(name, "UNAVAILABLE") for name in FACTOR_NAMES[1:]],
     ]
     report = aggregate(results)
-    assert report == {"score": None, "regime": "INSUFFICIENT_DATA", "coverage": 0.125}
+    assert report == {
+        "score": None,
+        "regime": "INSUFFICIENT_DATA",
+        "coverage": 0.125,
+        "available_factors": ["fundamental"],
+        "unavailable_factors": list(FACTOR_NAMES[1:]),
+    }
 
 
 def test_aggregate_with_full_coverage():
     results = [FactorResult(name, "OK", 75.0) for name in FACTOR_NAMES]
     report = aggregate(results)
-    assert report == {"score": 75.0, "regime": "RISK_ON", "coverage": 1.0}
+    assert report == {
+        "score": 75.0,
+        "regime": "RISK_ON",
+        "coverage": 1.0,
+        "available_factors": list(FACTOR_NAMES),
+        "unavailable_factors": [],
+    }
