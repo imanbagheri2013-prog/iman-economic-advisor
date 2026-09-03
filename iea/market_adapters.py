@@ -59,8 +59,10 @@ class BinanceMarketAdapter:
 
         current_oi = float(oi["openInterest"])
         previous_oi = None
+        oi_history_samples = 0
         if isinstance(oi_hist, list):
             valid = [row for row in oi_hist if isinstance(row, dict) and row.get("sumOpenInterest") is not None]
+            oi_history_samples = len(valid)
             if len(valid) >= 2:
                 valid.sort(key=lambda row: int(row.get("timestamp", 0)))
                 previous_oi = float(valid[-2]["sumOpenInterest"])
@@ -133,8 +135,10 @@ class BybitMarketAdapter:
 
         current_oi = float(ticker["openInterest"])
         previous_oi = None
+        oi_history_samples = 0
         if isinstance(oi_hist, list):
             valid = [row for row in oi_hist if row.get("openInterest") is not None]
+            oi_history_samples = len(valid)
             if len(valid) >= 2:
                 valid.sort(key=lambda row: int(row["timestamp"]))
                 previous_oi = float(valid[-2]["openInterest"])
@@ -259,6 +263,7 @@ class OKXMarketAdapter:
 
         current_oi = float(oi["oi"])
         parsed_oi = self._parse_oi_history(oi_history)
+        oi_history_samples = len(parsed_oi)
         previous_oi = parsed_oi[-2][1] if len(parsed_oi) >= 2 else None
         oi_change = None if previous_oi is None or previous_oi <= 0 else (current_oi / previous_oi - 1.0) * 100.0
 
@@ -367,7 +372,7 @@ def crypto_factor_adapters(adapter: Any):
         if snap.return_4h_pct is None or snap.return_24h_pct is None:
             return FactorResult("trend", "UNAVAILABLE", provider=getattr(adapter, "provider", "UNKNOWN"))
         score = 50.0 + snap.return_4h_pct * 4.0 + snap.return_24h_pct * 2.0
-        return FactorResult("trend", "OK", _bounded(score), 0.9, getattr(adapter, "provider", "UNKNOWN"), details={"symbol": snap.symbol, "return_4h_pct": round(snap.return_4h_pct, 4), "return_24h_pct": round(snap.return_24h_pct, 4)})
+        return FactorResult("trend", "OK", _bounded(score), 0.9, getattr(adapter, "provider", "UNKNOWN"), details={"symbol": snap.symbol, "return_4h_pct": round(snap.return_4h_pct, 4), "return_24h_pct": round(snap.return_24h_pct, 4), "sample_count": 25})
 
     def volume(_: Any):
         from .intelligence_v2 import FactorResult
@@ -378,7 +383,7 @@ def crypto_factor_adapters(adapter: Any):
             return FactorResult("volume", "UNAVAILABLE", provider=getattr(adapter, "provider", "UNKNOWN"))
         direction = 1.0 if snap.return_4h_pct is not None and snap.return_4h_pct > 0 else -1.0 if snap.return_4h_pct is not None and snap.return_4h_pct < 0 else 0.0
         score = 50.0 + direction * min(20.0, max(0.0, snap.relative_volume - 1.0) * 25.0)
-        return FactorResult("volume", "OK", _bounded(score), 0.8, getattr(adapter, "provider", "UNKNOWN"), details={"symbol": snap.symbol, "relative_volume_1h": round(snap.relative_volume, 4), "price_direction_4h": direction})
+        return FactorResult("volume", "OK", _bounded(score), 0.8, getattr(adapter, "provider", "UNKNOWN"), details={"symbol": snap.symbol, "relative_volume_1h": round(snap.relative_volume, 4), "price_direction_4h": direction, "sample_count": 25})
 
     def liquidity(_: Any):
         from .intelligence_v2 import FactorResult
@@ -394,7 +399,7 @@ def crypto_factor_adapters(adapter: Any):
         depth_score = _bounded((math.log10(max(total_depth_usd, 1.0)) - 5.0) * 20.0)
         balance_score = _bounded(100.0 - abs(snap.depth_imbalance) * 100.0)
         score = 0.5 * spread_score + 0.3 * depth_score + 0.2 * balance_score
-        return FactorResult("liquidity", "OK", _bounded(score), 0.9, getattr(adapter, "provider", "UNKNOWN"), details={"symbol": snap.symbol, "spread_bps": round(spread_bps, 4), "bid_depth_usd": round(snap.bid_depth, 2), "ask_depth_usd": round(snap.ask_depth, 2), "total_depth_usd": round(total_depth_usd, 2), "depth_imbalance": round(snap.depth_imbalance, 4)})
+        return FactorResult("liquidity", "OK", _bounded(score), 0.9, getattr(adapter, "provider", "UNKNOWN"), details={"symbol": snap.symbol, "spread_bps": round(spread_bps, 4), "bid_depth_usd": round(snap.bid_depth, 2), "ask_depth_usd": round(snap.ask_depth, 2), "total_depth_usd": round(total_depth_usd, 2), "depth_imbalance": round(snap.depth_imbalance, 4), "sample_count": 20})
 
     def open_interest(_: Any):
         from .intelligence_v2 import FactorResult
@@ -404,7 +409,7 @@ def crypto_factor_adapters(adapter: Any):
         if snap.oi_change_pct is None:
             return FactorResult("open_interest", "UNAVAILABLE", provider=getattr(adapter, "provider", "UNKNOWN"), details={"reason": "historical_open_interest_unavailable"})
         score = 50.0 + snap.oi_change_pct * 5.0
-        return FactorResult("open_interest", "OK", _bounded(score), 0.85, getattr(adapter, "provider", "UNKNOWN"), details={"symbol": snap.symbol, "open_interest": snap.open_interest, "previous_open_interest": snap.oi_previous, "oi_change_pct_1h": round(snap.oi_change_pct, 4)})
+        return FactorResult("open_interest", "OK", _bounded(score), 0.85, getattr(adapter, "provider", "UNKNOWN"), details={"symbol": snap.symbol, "open_interest": snap.open_interest, "previous_open_interest": snap.oi_previous, "oi_change_pct_1h": round(snap.oi_change_pct, 4), "sample_count": 2})
 
     def funding_rate(_: Any):
         from .intelligence_v2 import FactorResult
@@ -412,6 +417,6 @@ def crypto_factor_adapters(adapter: Any):
         if failure is not None:
             return failure
         score, regime = _funding_rate_score(snap.funding_rate)
-        return FactorResult("funding_rate", "OK", score, 0.85, getattr(adapter, "provider", "UNKNOWN"), details={"symbol": snap.symbol, "funding_rate": snap.funding_rate, "funding_rate_pct": round(snap.funding_rate * 100.0, 6), "funding_regime": regime})
+        return FactorResult("funding_rate", "OK", score, 0.85, getattr(adapter, "provider", "UNKNOWN"), details={"symbol": snap.symbol, "funding_rate": snap.funding_rate, "funding_rate_pct": round(snap.funding_rate * 100.0, 6), "funding_regime": regime, "sample_count": 1})
 
     return trend, volume, liquidity, open_interest, funding_rate
