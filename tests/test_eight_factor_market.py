@@ -3,7 +3,8 @@ from dataclasses import dataclass
 import pytest
 import requests
 
-from iea.eight_factor import analyze_eight_factor
+from iea.eight_factor import _dynamic_confidence, analyze_eight_factor
+from iea.intelligence_v2 import FactorResult
 from iea.market_adapters import MarketSnapshot, ResilientMarketAdapter
 
 
@@ -98,6 +99,25 @@ def test_eight_factor_market_adapters_fill_six_factors(tmp_path):
         assert by_name["news_risk"]["status"] == "UNAVAILABLE"
     finally:
         store.close()
+
+
+def test_market_confidence_uses_sample_depth():
+    full = FactorResult(
+        "trend",
+        "OK",
+        70.0,
+        provider="BINANCE_FUTURES",
+        details={"return_4h_pct": 1.0, "return_24h_pct": 2.0, "sample_count": 25},
+    )
+    partial = FactorResult(
+        "trend",
+        "OK",
+        70.0,
+        provider="BINANCE_FUTURES",
+        details={"return_4h_pct": 1.0, "return_24h_pct": 2.0, "sample_count": 5},
+    )
+    assert _dynamic_confidence(full) == 0.98
+    assert _dynamic_confidence(partial) < _dynamic_confidence(full)
 
 
 def test_eight_factor_market_provider_failure_is_non_fatal(tmp_path):
