@@ -69,16 +69,22 @@ class GDELTNewsAdapter:
             raise ValueError("GDELT API returned an invalid articles payload")
 
         normalized: list[dict[str, Any]] = []
+        seen: set[tuple[str, str]] = set()
         for article in articles:
             if not isinstance(article, dict):
                 continue
             title = str(article.get("title") or "").strip()
             if not title:
                 continue
+            url = article.get("url")
+            key = (title.casefold(), str(url or "").casefold())
+            if key in seen:
+                continue
+            seen.add(key)
             normalized.append(
                 {
                     "title": title,
-                    "url": article.get("url"),
+                    "url": url,
                     "domain": article.get("domain"),
                     "seendate": article.get("seendate"),
                 }
@@ -106,16 +112,23 @@ def news_risk_factor(adapter: GDELTNewsAdapter | None = None):
 
         try:
             snapshot = source.snapshot()
-        except (requests.RequestException, ValueError, KeyError, TypeError, OSError):
-            return FactorResult("news_risk", "UNAVAILABLE", provider="GDELT")
+        except (requests.RequestException, ValueError, KeyError, TypeError, OSError) as exc:
+            details = {"error_type": type(exc).__name__, "error_message": str(exc)}
+            response = getattr(exc, "response", None)
+            status_code = getattr(response, "status_code", None)
+            if status_code is not None:
+                details["status_code"] = status_code
+            return FactorResult("news_risk", "UNAVAILABLE", provider="GDELT", details=details)
 
         articles = snapshot.get("articles", [])
         risks = [_headline_risk(article["title"]) for article in articles if article.get("title")]
-        risk_score = round(sum(risks) / len(risks), 2) if risks else 0.0
+        average_risk = sum(risks) / len(risks) if risks else 0.0
+        # Keep a severe individual headline visible even when it is diluted by
+        # many neutral headlines. Repeated risk signals are still captured by
+        # the average across the full article set.
+        risk_score = round(max(average_risk, max(risks, default=0.0)), 2)
         market_score = round(100.0 - risk_score, 2)
 
-        # A single high-risk headline among otherwise normal news should still
-        # register as elevated, while repeated/severe risk signals become high.
         if risk_score >= 50:
             regime = "HIGH_RISK"
         elif risk_score >= 20:
@@ -144,6 +157,7 @@ def news_risk_factor(adapter: GDELTNewsAdapter | None = None):
                 "query": NEWS_QUERY,
                 "article_count": len(articles),
                 "risk_score": risk_score,
+                "average_risk_score": round(average_risk, 2),
                 "risk_regime": regime,
                 "top_risk_headlines": top_risk,
                 "source": "GDELT",
