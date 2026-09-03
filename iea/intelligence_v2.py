@@ -66,6 +66,16 @@ class FactorRegistry:
         return results
 
 
+def _confidence_weight(result: FactorResult) -> float:
+    """Return a safe aggregation weight in the inclusive range [0, 1]."""
+    if result.confidence is None:
+        return 1.0
+    try:
+        return max(0.0, min(1.0, float(result.confidence)))
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def aggregate(results: list[FactorResult], minimum_coverage: float = 0.5) -> dict[str, Any]:
     available = [r for r in results if r.score is not None and r.status == "OK"]
     unavailable = [r.name for r in results if r not in available]
@@ -83,7 +93,16 @@ def aggregate(results: list[FactorResult], minimum_coverage: float = 0.5) -> dic
             **base,
         }
 
-    score = round(sum(r.score for r in available) / len(available), 2)
+    weighted = [(r.score, _confidence_weight(r)) for r in available]
+    total_weight = sum(weight for _, weight in weighted)
+    if total_weight <= 0:
+        return {
+            "score": None,
+            "regime": "INSUFFICIENT_DATA",
+            **base,
+        }
+
+    score = round(sum(score * weight for score, weight in weighted) / total_weight, 2)
     if score >= 62.5:
         regime = "RISK_ON"
     elif score <= 37.5:
