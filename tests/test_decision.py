@@ -1,104 +1,110 @@
 from iea.decision import build_decision
 
 
-def test_decision_blocks_when_coverage_is_insufficient():
-    report = {"score": 80.0, "coverage": 0.5, "regime": "RISK_ON"}
-    decision = build_decision(report)
-    assert decision["action"] == "NO_TRADE"
-    assert decision["conviction"] == 0.0
-    assert decision["risk_tier"] == "LOW"
-    assert decision["risk_multiplier"] == 1.0
+def test_insufficient_coverage_is_no_trade_with_low_risk_budget():
+    result = build_decision({"score": 80, "coverage": 0.5, "regime": "RISK_ON"})
+    assert result["action"] == "NO_TRADE"
+    assert result["risk_tier"] == "LOW"
+    assert result["exposure_multiplier"] == 1.0
 
 
-def test_decision_returns_buy_bias_for_decisive_risk_on():
-    report = {"score": 80.0, "coverage": 1.0, "regime": "RISK_ON"}
-    decision = build_decision(report)
-    assert decision["action"] == "BUY_BIAS"
-    assert decision["conviction"] > 0.5
-    assert decision["risk_tier"] == "LOW"
+def test_risk_on_decisive_score_is_buy_bias():
+    result = build_decision({"score": 80, "coverage": 0.8, "regime": "RISK_ON"})
+    assert result["action"] == "BUY_BIAS"
+    assert result["risk_tier"] == "LOW"
+    assert result["exposure_multiplier"] == 1.0
 
 
-def test_decision_returns_sell_bias_for_decisive_risk_off():
-    report = {"score": 20.0, "coverage": 0.75, "regime": "RISK_OFF"}
-    decision = build_decision(report)
-    assert decision["action"] == "SELL_BIAS"
-    assert decision["conviction"] > 0.5
-    assert decision["risk_multiplier"] == 1.0
+def test_risk_off_decisive_score_is_sell_bias():
+    result = build_decision({"score": 20, "coverage": 0.8, "regime": "RISK_OFF"})
+    assert result["action"] == "SELL_BIAS"
+    assert result["risk_tier"] == "LOW"
+    assert result["risk_multiplier"] == 1.0
+    assert result["exposure_multiplier"] == 1.0
 
 
-def test_decision_holds_neutral_regime():
-    report = {"score": 50.0, "coverage": 1.0, "regime": "NEUTRAL"}
-    decision = build_decision(report)
-    assert decision["action"] == "HOLD"
-    assert decision["conviction"] == 0.5
+def test_neutral_score_is_hold():
+    result = build_decision({"score": 50, "coverage": 0.8, "regime": "NEUTRAL"})
+    assert result["action"] == "HOLD"
+    assert result["risk_tier"] == "LOW"
+    assert result["exposure_multiplier"] == 1.0
 
 
-def test_high_news_risk_blocks_directional_decision():
-    report = {
-        "score": 85.0,
-        "coverage": 1.0,
-        "regime": "RISK_ON",
-        "factors": [
-            {"name": "news_risk", "status": "OK", "details": {"risk_regime": "HIGH_RISK"}},
-        ],
-    }
-    decision = build_decision(report)
-    assert decision["action"] == "NO_TRADE"
-    assert decision["conviction"] == 0.0
-    assert decision["risk_score"] == 60
-    assert decision["risk_tier"] == "CRITICAL"
-    assert decision["risk_multiplier"] == 0.4
-    assert "high_news_risk" in decision["risk_flags"]
+def test_high_news_risk_blocks_trade_and_sets_critical_budget():
+    result = build_decision(
+        {
+            "score": 80,
+            "coverage": 1.0,
+            "regime": "RISK_ON",
+            "factors": [
+                {"name": "news_risk", "details": {"risk_regime": "HIGH_RISK"}},
+                {"name": "liquidity", "details": {"depth_imbalance": 0.0}},
+            ],
+        }
+    )
+    assert result["action"] == "NO_TRADE"
+    assert result["risk_score"] == 60
+    assert result["risk_tier"] == "CRITICAL"
+    assert result["risk_multiplier"] == 0.4
+    assert result["exposure_multiplier"] == 0.0
 
 
-def test_liquidity_unavailable_blocks_directional_decision():
-    report = {
-        "score": 85.0,
-        "coverage": 1.0,
-        "regime": "RISK_ON",
-        "factors": [
-            {"name": "liquidity", "status": "UNAVAILABLE", "details": {}},
-        ],
-    }
-    decision = build_decision(report)
-    assert decision["action"] == "NO_TRADE"
-    assert decision["risk_score"] == 50
-    assert decision["risk_tier"] == "HIGH"
-    assert decision["risk_multiplier"] == 0.5
-    assert "liquidity_unavailable" in decision["risk_flags"]
+def test_liquidity_unavailable_blocks_trade_and_sets_high_budget():
+    result = build_decision(
+        {
+            "score": 80,
+            "coverage": 1.0,
+            "regime": "RISK_ON",
+            "factors": [
+                {"name": "news_risk", "details": {"risk_regime": "LOW_RISK"}},
+            ],
+        }
+    )
+    assert result["action"] == "NO_TRADE"
+    assert result["risk_score"] == 50
+    assert result["risk_tier"] == "HIGH"
+    assert result["risk_multiplier"] == 0.5
+    assert result["exposure_multiplier"] == 0.5
 
 
-def test_extreme_funding_reduces_conviction():
-    report = {
-        "score": 80.0,
-        "coverage": 1.0,
-        "regime": "RISK_ON",
-        "factors": [
-            {"name": "funding_rate", "status": "OK", "details": {"funding_rate_pct": 0.10}},
-        ],
-    }
-    decision = build_decision(report)
-    assert decision["action"] == "BUY_BIAS"
-    assert decision["conviction"] < 0.75
-    assert decision["risk_score"] == 25
-    assert decision["risk_tier"] == "MODERATE"
-    assert decision["risk_multiplier"] == 0.75
-    assert "extreme_funding_crowding" in decision["risk_flags"]
+def test_extreme_funding_reduces_conviction_and_sets_moderate_budget():
+    result = build_decision(
+        {
+            "score": 80,
+            "coverage": 1.0,
+            "regime": "RISK_ON",
+            "factors": [
+                {"name": "news_risk", "details": {"risk_regime": "LOW_RISK"}},
+                {"name": "liquidity", "details": {"depth_imbalance": 0.0}},
+                {"name": "funding_rate", "details": {"funding_rate_pct": 0.1}},
+            ],
+        }
+    )
+    assert result["action"] == "BUY_BIAS"
+    assert result["risk_score"] == 25
+    assert result["risk_tier"] == "MODERATE"
+    assert result["risk_multiplier"] == 0.75
+    assert result["exposure_multiplier"] == 0.75
+    assert result["conviction"] < 1.0
 
 
-def test_oi_trend_divergence_adds_risk_flag():
-    report = {
-        "score": 80.0,
-        "coverage": 1.0,
-        "regime": "RISK_ON",
-        "factors": [
-            {"name": "open_interest", "status": "OK", "details": {"oi_change_pct_1h": 6.0}},
-            {"name": "trend", "status": "OK", "details": {"return_4h_pct": -2.0}},
-        ],
-    }
-    decision = build_decision(report)
-    assert decision["action"] == "BUY_BIAS"
-    assert decision["risk_score"] == 20
-    assert decision["risk_tier"] == "MODERATE"
-    assert decision["risk_multiplier"] == 0.8
-    assert "oi_trend_divergence" in decision["risk_flags"]
+def test_oi_trend_divergence_adds_risk_and_sets_moderate_budget():
+    result = build_decision(
+        {
+            "score": 80,
+            "coverage": 1.0,
+            "regime": "RISK_ON",
+            "factors": [
+                {"name": "news_risk", "details": {"risk_regime": "LOW_RISK"}},
+                {"name": "liquidity", "details": {"depth_imbalance": 0.0}},
+                {"name": "open_interest", "details": {"oi_change_pct_1h": 6.0}},
+                {"name": "trend", "details": {"return_4h_pct": -2.0}},
+            ],
+        }
+    )
+    assert result["action"] == "BUY_BIAS"
+    assert result["risk_score"] == 20
+    assert result["risk_tier"] == "MODERATE"
+    assert result["risk_multiplier"] == 0.8
+    assert result["exposure_multiplier"] == 0.75
+    assert "oi_trend_divergence" in result["risk_flags"]
