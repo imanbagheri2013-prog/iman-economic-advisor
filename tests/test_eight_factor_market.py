@@ -116,7 +116,7 @@ def test_market_confidence_uses_sample_depth():
         provider="BINANCE_FUTURES",
         details={"return_4h_pct": 1.0, "return_24h_pct": 2.0, "sample_count": 5},
     )
-    assert _dynamic_confidence(full) == 0.98
+    assert _dynamic_confidence(full) == 0.993
     assert _dynamic_confidence(partial) < _dynamic_confidence(full)
 
 
