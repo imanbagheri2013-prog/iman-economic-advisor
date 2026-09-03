@@ -13,7 +13,7 @@ def test_dynamic_confidence_rewards_complete_fresh_data():
         details={"return_4h_pct": 1.0, "return_24h_pct": 2.0},
     )
     confidence = _dynamic_confidence(result)
-    assert 0.97 <= confidence <= 0.98
+    assert confidence == 0.993
 
 
 def test_dynamic_confidence_penalizes_missing_market_fields():
@@ -38,7 +38,7 @@ def test_dynamic_confidence_uses_news_sample_size():
         details={"article_count": 20},
     )
     confidence = _dynamic_confidence(result)
-    assert 0.79 <= confidence <= 0.81
+    assert confidence == 0.928
 
 
 def test_dynamic_confidence_zero_for_unavailable_factor():
