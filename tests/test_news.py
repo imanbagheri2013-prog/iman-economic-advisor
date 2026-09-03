@@ -39,6 +39,22 @@ def test_gdelt_adapter_parses_articles(monkeypatch):
     assert snapshot["source"] == "GDELT"
 
 
+def test_gdelt_adapter_deduplicates_articles(monkeypatch):
+    payload = {
+        "articles": [
+            {"title": "Crypto exchange hit by hack", "url": "https://example.com/1", "domain": "example.com", "seendate": "20260902160000"},
+            {"title": "Crypto exchange hit by hack", "url": "https://example.com/1", "domain": "example.com", "seendate": "20260902155900"},
+            {"title": "Bitcoin rises after ETF approval", "url": "https://example.com/2", "domain": "example.com", "seendate": "20260902150000"},
+        ]
+    }
+
+    monkeypatch.setattr("iea.news.requests.get", lambda *args, **kwargs: FakeResponse(payload))
+    snapshot = GDELTNewsAdapter().snapshot()
+
+    assert snapshot["count"] == 2
+    assert len(snapshot["articles"]) == 2
+
+
 def test_news_risk_factor_scores_headline_risk():
     class FakeAdapter:
         def snapshot(self):
@@ -61,7 +77,28 @@ def test_news_risk_factor_scores_headline_risk():
     assert result.details["top_risk_headlines"][0]["title"].startswith("Major crypto exchange")
 
 
-def test_news_risk_factor_fails_closed():
+def test_news_risk_factor_preserves_severe_single_headline():
+    class FakeAdapter:
+        def snapshot(self):
+            return {
+                "articles": [
+                    {"title": "Major crypto exchange hack caused stolen funds and fraud during bankruptcy"},
+                    {"title": "Bitcoin market update"},
+                    {"title": "Ethereum price analysis"},
+                    {"title": "Crypto ETF inflows continue"},
+                ],
+                "timestamp": "2026-09-02T16:00:00+00:00",
+            }
+
+    result = news_risk_factor(FakeAdapter())(None)
+
+    assert result.status == "OK"
+    assert result.details["risk_score"] >= 50.0
+    assert result.details["risk_regime"] == "HIGH_RISK"
+    assert result.details["average_risk_score"] < result.details["risk_score"]
+
+
+def test_news_risk_factor_fails_closed_with_error_details():
     class BrokenAdapter:
         def snapshot(self):
             raise ValueError("bad payload")
@@ -71,3 +108,5 @@ def test_news_risk_factor_fails_closed():
     assert result.status == "UNAVAILABLE"
     assert result.score is None
     assert result.provider == "GDELT"
+    assert result.details["error_type"] == "ValueError"
+    assert result.details["error_message"] == "bad payload"
