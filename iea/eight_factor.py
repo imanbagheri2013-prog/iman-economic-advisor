@@ -3,11 +3,72 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from .confidence import clamp_confidence, combine_confidence, coverage_confidence, freshness_confidence, sample_confidence
 from .intelligence import analyze
 from .intelligence_v2 import FactorRegistry, FactorResult, aggregate
 from .market_adapters import ResilientMarketAdapter, crypto_factor_adapters
 from .news import GDELTNewsAdapter, news_risk_factor
 from .sentiment import AlternativeFearGreedAdapter, sentiment_factor
+
+
+_PROVIDER_BASE_CONFIDENCE = {
+    "FRED": 0.95,
+    "BINANCE_FUTURES": 0.98,
+    "BYBIT_LINEAR": 0.94,
+    "OKX_SWAP": 0.90,
+    "ALTERNATIVE_ME": 0.85,
+    "GDELT": 0.80,
+}
+
+_FACTOR_MAX_AGE_HOURS = {
+    "fundamental": 24 * 30,
+    "trend": 2,
+    "volume": 2,
+    "liquidity": 1,
+    "sentiment": 48,
+    "news_risk": 8,
+    "open_interest": 2,
+    "funding_rate": 2,
+}
+
+_FACTOR_REQUIRED_FIELDS = {
+    "trend": ("return_4h_pct", "return_24h_pct"),
+    "volume": ("relative_volume_1h",),
+    "liquidity": ("bid_depth_usd", "ask_depth_usd", "depth_imbalance"),
+    "open_interest": ("open_interest", "previous_open_interest", "oi_change_pct_1h"),
+    "funding_rate": ("funding_rate_pct", "funding_regime"),
+    "sentiment": ("value", "classification"),
+}
+
+
+def _dynamic_confidence(result: FactorResult) -> float:
+    """Derive factor confidence from provider, freshness, and data completeness."""
+    if result.status != "OK":
+        return 0.0
+
+    details = result.details or {}
+    provider_quality = _PROVIDER_BASE_CONFIDENCE.get(result.provider or "", 0.70)
+    quality_signals = [provider_quality]
+
+    if result.timestamp:
+        quality_signals.append(
+            freshness_confidence(
+                result.timestamp,
+                max_age_hours=_FACTOR_MAX_AGE_HOURS.get(result.name, 24),
+            )
+        )
+
+    required = _FACTOR_REQUIRED_FIELDS.get(result.name)
+    if required:
+        present = sum(details.get(field) is not None for field in required)
+        quality_signals.append(sample_confidence(present, target=len(required)))
+
+    if "coverage" in details:
+        quality_signals.append(coverage_confidence(details["coverage"]))
+    if "article_count" in details:
+        quality_signals.append(sample_confidence(details["article_count"], target=10))
+
+    return round(combine_confidence(*quality_signals), 3)
 
 
 def _fundamental_adapter(store: Any) -> FactorResult:
@@ -21,7 +82,7 @@ def _fundamental_adapter(store: Any) -> FactorResult:
         confidence=report["coverage"],
         provider="FRED",
         timestamp=report["generated_at"],
-        details={"engine": report["engine"], "macro_regime": report["regime"]},
+        details={"engine": report["engine"], "macro_regime": report["regime"], "coverage": report["coverage"]},
     )
 
 
@@ -44,7 +105,19 @@ def analyze_eight_factor(
     registry.register("sentiment", sentiment_factor(sentiment_adapter))
     registry.register("news_risk", news_risk_factor(news_adapter))
 
-    results = registry.evaluate(store)
+    raw_results = registry.evaluate(store)
+    results = [
+        FactorResult(
+            name=result.name,
+            status=result.status,
+            score=result.score,
+            confidence=_dynamic_confidence(result),
+            provider=result.provider,
+            timestamp=result.timestamp,
+            details=result.details,
+        )
+        for result in raw_results
+    ]
     summary = aggregate(results)
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
