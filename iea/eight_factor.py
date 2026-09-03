@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .confidence import clamp_confidence, combine_confidence, coverage_confidence, freshness_confidence, sample_confidence
+from .decision import build_decision
 from .intelligence import analyze
 from .intelligence_v2 import FactorRegistry, FactorResult, aggregate
 from .market_adapters import ResilientMarketAdapter, crypto_factor_adapters
@@ -136,5 +137,6 @@ def analyze_eight_factor(
         "engine": "eight_factor_market_intelligence_v2",
         "symbol": market.symbol,
         **summary,
+        "decision": build_decision(summary),
         "factors": [result.as_dict() for result in results],
     }
