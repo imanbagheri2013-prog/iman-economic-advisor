@@ -110,7 +110,10 @@ def aggregate(results: list[FactorResult], minimum_coverage: float = 0.5) -> dic
         result.name: round(result.score * weight / total_weight, 2)
         for result, weight in weighted
     }
-    score = round(sum(contributions.values()), 2)
+    score = round(
+        sum(result.score * weight for result, weight in weighted) / total_weight,
+        2,
+    )
     if score >= 62.5:
         regime = "RISK_ON"
     elif score <= 37.5:
