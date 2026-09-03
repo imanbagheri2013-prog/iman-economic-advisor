@@ -44,3 +44,24 @@ def test_aggregate_with_full_coverage():
         "available_factors": list(FACTOR_NAMES),
         "unavailable_factors": [],
     }
+
+
+def test_aggregate_weights_scores_by_confidence():
+    results = [
+        FactorResult("fundamental", "OK", 100.0, confidence=1.0),
+        FactorResult("trend", "OK", 0.0, confidence=0.25),
+        *[FactorResult(name, "UNAVAILABLE") for name in FACTOR_NAMES[2:]],
+    ]
+    report = aggregate(results, minimum_coverage=0.25)
+    assert report["score"] == 80.0
+    assert report["regime"] == "RISK_ON"
+
+
+def test_aggregate_clamps_invalid_confidence_safely():
+    results = [
+        FactorResult("fundamental", "OK", 100.0, confidence=2.0),
+        FactorResult("trend", "OK", 0.0, confidence=-1.0),
+        *[FactorResult(name, "UNAVAILABLE") for name in FACTOR_NAMES[2:]],
+    ]
+    report = aggregate(results, minimum_coverage=0.25)
+    assert report["score"] == 100.0
