@@ -41,7 +41,17 @@ def _load_market_state() -> dict | None:
         payload = json.loads(MARKET_STATE_PATH.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
-    return payload if isinstance(payload, dict) else None
+    if not isinstance(payload, dict):
+        return None
+    if payload.get("market_region") != "IRAN":
+        return None
+    if payload.get("data_mode") != "LIVE_MARKET":
+        return None
+    if payload.get("stale") is True:
+        return None
+    if not payload.get("generated_at") or not isinstance(payload.get("factors"), dict):
+        return None
+    return payload
 
 
 def _market_context(now: datetime | None = None) -> tuple[str, str]:
