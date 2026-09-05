@@ -27,3 +27,17 @@ def test_risk_policy_is_immutable():
         pass
     else:
         raise AssertionError("RiskPolicy must remain immutable")
+
+
+def test_risk_policy_centralizes_decision_thresholds():
+    policy = DEFAULT_RISK_POLICY
+    assert policy.buy_threshold == 62.5
+    assert policy.sell_threshold == 37.5
+    assert policy.minimum_coverage == 0.625
+
+
+def test_risk_policy_decision_thresholds_can_be_tuned():
+    policy = RiskPolicy(buy_threshold=70.0, sell_threshold=30.0, minimum_coverage=0.75)
+    assert policy.buy_threshold == 70.0
+    assert policy.sell_threshold == 30.0
+    assert policy.minimum_coverage == 0.75
