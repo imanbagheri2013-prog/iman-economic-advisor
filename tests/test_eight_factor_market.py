@@ -57,6 +57,11 @@ class FakeSecondary:
         return FakeMarket(provider=self.provider).snapshot()
 
 
+class FailingNews:
+    def snapshot(self):
+        raise requests.RequestException("deterministic test failure")
+
+
 @dataclass
 class FakeSentiment:
     value: float = 62.0
@@ -105,7 +110,13 @@ def test_eight_factor_capital_flows_into_advisory_sizing(tmp_path):
     from iea.storage import Store
     store = Store(tmp_path / "capital.sqlite3")
     try:
-        report = analyze_eight_factor(store, FakeMarket(), FakeSentiment(), capital=100000000)
+        report = analyze_eight_factor(
+            store,
+            FakeMarket(),
+            FakeSentiment(),
+            news_adapter=FailingNews(),
+            capital=100000000,
+        )
         assert report["decision"]["exposure_budget"] == 75000000.0
         assert report["decision"]["exposure_multiplier"] == 0.75
     finally:
