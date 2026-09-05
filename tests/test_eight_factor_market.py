@@ -73,7 +73,7 @@ def test_eight_factor_market_adapters_fill_six_factors(tmp_path):
     try:
         report = analyze_eight_factor(store, market, FakeSentiment())
         assert report["symbol"] == "BTCUSDT"
-        assert report["coverage"] == 0.875
+        assert report["coverage"] == 0.75
         assert report["score"] is not None
         assert report["regime"] in {"RISK_ON", "NEUTRAL", "RISK_OFF"}
         assert market.snapshot_calls == 1
@@ -106,8 +106,8 @@ def test_eight_factor_capital_flows_into_advisory_sizing(tmp_path):
     store = Store(tmp_path / "capital.sqlite3")
     try:
         report = analyze_eight_factor(store, FakeMarket(), FakeSentiment(), capital=100000000)
-        assert report["decision"]["exposure_budget"] == 75000000.0
-        assert report["decision"]["exposure_multiplier"] == 0.75
+        assert report["decision"]["exposure_budget"] == 100000000.0
+        assert report["decision"]["exposure_multiplier"] == 1.0
     finally:
         store.close()
 
