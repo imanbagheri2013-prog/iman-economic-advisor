@@ -223,3 +223,56 @@ def test_no_trade_does_not_publish_actionable_trade_levels():
     result = build_decision(report)
     assert result["action"] == "NO_TRADE"
     assert "trade_levels" not in result
+
+
+def test_buy_decision_derives_dynamic_stop_loss_from_atr():
+    report = {
+        "score": 80,
+        "coverage": 1.0,
+        "regime": "RISK_ON",
+        "capital": 100000000,
+        "entry_price": 100000,
+        "atr": 2000,
+        "factors": _safe_factors(),
+    }
+    result = build_decision(report)
+    assert result["action"] == "BUY_BIAS"
+    assert result["dynamic_stop_loss"] == 97000.0
+    assert result["position_size"] == 50000000.0
+    assert result["trade_levels"]["take_profit"] == 106000.0
+    assert "ATR" in result["dynamic_stop_loss_rationale"]
+
+
+def test_sell_decision_derives_dynamic_stop_loss_from_custom_atr_multiplier():
+    report = {
+        "score": 20,
+        "coverage": 1.0,
+        "regime": "RISK_OFF",
+        "capital": 100000000,
+        "entry_price": 100000,
+        "atr": 2000,
+        "atr_multiplier": 2.0,
+        "risk_reward_ratio": 3.0,
+        "factors": _safe_factors(),
+    }
+    result = build_decision(report)
+    assert result["action"] == "SELL_BIAS"
+    assert result["dynamic_stop_loss"] == 104000.0
+    assert result["trade_levels"]["take_profit"] == 88000.0
+    assert result["trade_levels"]["risk_reward_ratio"] == 3.0
+
+
+def test_explicit_stop_loss_takes_precedence_over_atr():
+    report = {
+        "score": 80,
+        "coverage": 1.0,
+        "regime": "RISK_ON",
+        "capital": 100000000,
+        "entry_price": 100000,
+        "stop_loss": 95000,
+        "atr": 2000,
+        "factors": _safe_factors(),
+    }
+    result = build_decision(report)
+    assert "dynamic_stop_loss" not in result
+    assert result["trade_levels"]["stop_loss"] == 95000.0
