@@ -121,7 +121,7 @@ def build_decision(report: dict[str, Any], policy: RiskPolicy = DEFAULT_RISK_POL
     if exposure_budget is not None:
         result["exposure_budget"] = exposure_budget
         result["sizing_rationale"] = (
-            f"Capital-based advisory budget: {exposure_budget:.2f} from capital {float(capital):.2f} "
+            f"capital-based advisory budget: {exposure_budget:.2f} from capital {float(capital):.2f} "
             f"at {exposure_multiplier:.0%} exposure; no trade is executed."
         )
     return result
