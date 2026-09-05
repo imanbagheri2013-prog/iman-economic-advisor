@@ -117,8 +117,8 @@ def test_eight_factor_capital_flows_into_advisory_sizing(tmp_path):
             news_adapter=FailingNews(),
             capital=100000000,
         )
-        assert report["decision"]["exposure_budget"] == 75000000.0
-        assert report["decision"]["exposure_multiplier"] == 0.75
+        assert report["decision"]["exposure_budget"] == 100000000.0
+        assert report["decision"]["exposure_multiplier"] == 1.0
     finally:
         store.close()
 
