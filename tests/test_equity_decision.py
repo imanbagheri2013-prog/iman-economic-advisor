@@ -1,5 +1,6 @@
 import pytest
 
+from iea.advisor import build_equity_advisor_report
 from iea.equity_analysis import analyze_equity
 from iea.equity_decision import build_equity_market_decision
 from iea.equity_fundamentals import FundamentalSnapshot
@@ -89,3 +90,29 @@ def test_weights_are_normalized():
     )
     assert result["equity_weight"] == pytest.approx(0.4)
     assert result["market_weight"] == pytest.approx(0.6)
+
+
+def test_end_to_end_equity_advisor_report_contains_all_layers():
+    result = build_equity_advisor_report(
+        snapshot=snapshot(),
+        current_price=20,
+        method_values=[30, 28],
+        method_weights=[0.6, 0.4],
+        market_report={
+            "score": 70,
+            "coverage": 1.0,
+            "factors": [
+                {"name": "news_risk", "details": {"risk_regime": "LOW_RISK"}},
+                {"name": "liquidity", "details": {"depth_imbalance": 0.0}},
+            ],
+        },
+        confidence=0.8,
+        methods_used=["pe", "dcf_fcff"],
+    )
+    assert result["engine"] == "iea_equity_advisor_v1"
+    assert result["symbol"] == "TEST"
+    assert result["analysis"]["final_score"] == pytest.approx(98.4)
+    assert result["market"]["score"] == 70
+    assert result["combined_score"] == pytest.approx(81.36)
+    assert result["decision"]["action"] == "BUY_BIAS"
+    assert result["analysis"]["valuation"]["intrinsic_value"] == pytest.approx(29.2)
