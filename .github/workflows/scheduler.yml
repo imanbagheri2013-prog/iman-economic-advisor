@@ -6,7 +6,15 @@ on:
     branches:
       - main
   schedule:
-    - cron: "0 */6 * * *"
+    # Iran cash equities: Sat-Wed, 09:00-12:30 Tehran time.
+    # Run around the session; Python session gating remains authoritative
+    # for holidays, pre-open, close, and unexpected market closures.
+    - cron: "30,45 8 * * 0-3,6"
+      timezone: "Asia/Tehran"
+    - cron: "*/15 9-11 * * 0-3,6"
+      timezone: "Asia/Tehran"
+    - cron: "0,15,30 12 * * 0-3,6"
+      timezone: "Asia/Tehran"
 
 jobs:
   scheduler:
