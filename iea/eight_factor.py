@@ -62,8 +62,12 @@ def _dynamic_confidence(result: FactorResult) -> float:
         quality_signals.append(freshness_confidence(result.timestamp, max_age_hours=_FACTOR_MAX_AGE_HOURS.get(result.name, 24)))
     required = _FACTOR_REQUIRED_FIELDS.get(result.name)
     if required:
-        alternatives = {"trend": (("return_4h_pct", "return_24h_pct"), ("return_1d_pct", "return_20d_pct")),
-                        "volume": (("relative_volume_1h",), ("market_volume", "breadth_up_pct", "breadth_down_pct"))}.get(result.name, (required,))
+        alternatives = {
+            "trend": (("return_4h_pct", "return_24h_pct"), ("return_1d_pct", "return_20d_pct")),
+            "volume": (("relative_volume_1h",), ("market_volume", "breadth_up_pct", "breadth_down_pct")),
+            "liquidity": (("bid_depth_usd", "ask_depth_usd", "depth_imbalance"),
+                          ("bid_depth_value", "ask_depth_value", "depth_imbalance")),
+        }.get(result.name, (required,))
         best_present = 0
         best_target = len(required)
         for candidate in alternatives:
