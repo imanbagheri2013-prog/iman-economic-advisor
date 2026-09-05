@@ -33,6 +33,7 @@ jobs:
           BLS_START_YEAR: "2021"
           BLS_END_YEAR: "2026"
           IEA_DB_PATH: "data/iea.sqlite3"
+          IEA_CAPITAL: ${{ vars.IEA_CAPITAL }}
         run: python -m iea.scheduler
 
       - name: Upload health report
