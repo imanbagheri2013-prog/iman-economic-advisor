@@ -1,6 +1,19 @@
 from __future__ import annotations
 
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 from iea.iran_market import IranMarketAdapter, iran_factor_adapters
+
+
+TEHRAN = ZoneInfo("Asia/Tehran")
+
+
+def test_iran_market_session_state():
+    assert IranMarketAdapter.session_state(datetime(2026, 9, 5, 10, 0, tzinfo=TEHRAN)) == ("OPEN", "2026-09-05")
+    assert IranMarketAdapter.session_state(datetime(2026, 9, 5, 8, 50, tzinfo=TEHRAN)) == ("PRE_OPEN", "2026-09-05")
+    assert IranMarketAdapter.session_state(datetime(2026, 9, 5, 13, 0, tzinfo=TEHRAN)) == ("CLOSED", "2026-09-05")
+    assert IranMarketAdapter.session_state(datetime(2026, 9, 3, 10, 0, tzinfo=TEHRAN)) == ("CLOSED", "2026-09-03")
 
 
 def test_iran_market_snapshot_and_factors(monkeypatch):
@@ -41,9 +54,11 @@ def test_iran_market_snapshot_and_factors(monkeypatch):
         return Response()
 
     monkeypatch.setattr("requests.get", fake_get)
-    snapshot = IranMarketAdapter().snapshot()
+    snapshot = IranMarketAdapter().snapshot(now=datetime(2026, 9, 5, 10, 0, tzinfo=TEHRAN))
 
     assert snapshot.symbol == "IRAN_MARKET"
+    assert snapshot.market_status == "OPEN"
+    assert snapshot.session_date == "2026-09-05"
     assert snapshot.price == 1100
     assert snapshot.active_symbols == 3
     assert snapshot.return_1d_pct is not None
