@@ -20,6 +20,8 @@ def test_insufficient_coverage_is_no_trade_with_low_risk_budget():
     assert result["action"] == "NO_TRADE"
     assert result["risk_tier"] == "LOW"
     assert result["exposure_multiplier"] == 1.0
+    assert "no material risk flags" in result["risk_rationale"]
+    assert "100%" in result["exposure_rationale"]
 
 
 def test_risk_on_decisive_score_is_buy_bias():
@@ -82,6 +84,8 @@ def test_high_news_risk_blocks_trade_and_sets_critical_budget():
     assert result["risk_tier"] == "CRITICAL"
     assert result["risk_multiplier"] == 0.4
     assert result["exposure_multiplier"] == 0.0
+    assert "high_news_risk" in result["risk_rationale"]
+    assert "0%" in result["exposure_rationale"]
 
 
 def test_liquidity_unavailable_blocks_trade_and_sets_high_budget():
@@ -100,6 +104,8 @@ def test_liquidity_unavailable_blocks_trade_and_sets_high_budget():
     assert result["risk_tier"] == "HIGH"
     assert result["risk_multiplier"] == 0.5
     assert result["exposure_multiplier"] == 0.5
+    assert "liquidity_unavailable" in result["risk_rationale"]
+    assert "50%" in result["exposure_rationale"]
 
 
 def test_extreme_funding_reduces_conviction_and_sets_moderate_budget():
@@ -121,6 +127,8 @@ def test_extreme_funding_reduces_conviction_and_sets_moderate_budget():
     assert result["risk_multiplier"] == 0.75
     assert result["exposure_multiplier"] == 0.75
     assert result["conviction"] < 1.0
+    assert "extreme_funding_crowding" in result["risk_rationale"]
+    assert "75%" in result["exposure_rationale"]
 
 
 def test_oi_trend_divergence_adds_risk_and_sets_moderate_budget():
@@ -143,3 +151,4 @@ def test_oi_trend_divergence_adds_risk_and_sets_moderate_budget():
     assert result["risk_multiplier"] == 0.8
     assert result["exposure_multiplier"] == 0.75
     assert "oi_trend_divergence" in result["risk_flags"]
+    assert "oi_trend_divergence" in result["risk_rationale"]
