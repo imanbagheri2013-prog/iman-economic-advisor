@@ -15,7 +15,7 @@ def test_scheduler_market_context_uses_tehran_session():
     assert scheduler._market_context(datetime(2026, 9, 3, 10, 0, tzinfo=TEHRAN)) == ("CLOSED", "2026-09-03")
 
 
-def test_closed_scheduler_reuses_last_valid_state(tmp_path: Path, monkeypatch):
+def test_closed_scheduler_reuses_last_valid_state_as_non_actionable_snapshot(tmp_path: Path, monkeypatch):
     state_path = tmp_path / "iran_market_state.json"
     state_path.write_text(
         '{"generated_at":"2026-09-05T06:30:00+00:00","market_region":"IRAN",'
@@ -29,7 +29,8 @@ def test_closed_scheduler_reuses_last_valid_state(tmp_path: Path, monkeypatch):
 
     assert result["score"] == 72.5
     assert result["regime"] == "RISK_ON"
-    assert result["decision"]["action"] == "BUY_BIAS"
+    assert result["decision"]["action"] == "NO_TRADE"
+    assert result["last_valid_decision"]["action"] == "BUY_BIAS"
     assert result["market_status"] == "CLOSED"
     assert result["data_mode"] == "LAST_VALID_OPEN_SNAPSHOT"
     assert result["stale"] is True
