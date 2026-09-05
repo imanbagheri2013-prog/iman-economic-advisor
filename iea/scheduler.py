@@ -75,7 +75,7 @@ def _closed_market_intelligence(market_status: str, session_date: str) -> dict:
             "coverage": 0.0,
             "regime": "NEUTRAL",
             "decision": {"action": "NO_TRADE", "reason": "Iran cash market is not open and no prior live snapshot is available"},
-            "factors": {},
+            "factors": [],
         }
 
     snapshot = deepcopy(previous)
