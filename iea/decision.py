@@ -5,6 +5,7 @@ from typing import Any
 from .risk import DEFAULT_RISK_POLICY, RiskPolicy
 from .sizing import (
     DEFAULT_SIZING_POLICY,
+    calculate_dynamic_stop_loss,
     calculate_exposure_budget,
     calculate_position_size,
     calculate_trade_levels,
@@ -113,7 +114,16 @@ def build_decision(report: dict[str, Any], policy: RiskPolicy = DEFAULT_RISK_POL
     trade_levels = None
     entry_price = report.get("entry_price")
     stop_loss = report.get("stop_loss")
+    atr = report.get("atr")
+    atr_multiplier = report.get("atr_multiplier", DEFAULT_SIZING_POLICY.default_atr_multiplier)
     risk_reward_ratio = report.get("risk_reward_ratio", 2.0)
+    dynamic_stop_loss = None
+
+    if entry_price is not None and stop_loss is None and atr is not None and action in {"BUY_BIAS", "SELL_BIAS"}:
+        side = "BUY" if action == "BUY_BIAS" else "SELL"
+        dynamic_stop_loss = calculate_dynamic_stop_loss(entry_price, side, atr, atr_multiplier)
+        stop_loss = dynamic_stop_loss
+
     if capital is not None:
         exposure_budget = calculate_exposure_budget(capital, exposure_multiplier)
         if entry_price is not None and stop_loss is not None:
@@ -154,6 +164,12 @@ def build_decision(report: dict[str, Any], policy: RiskPolicy = DEFAULT_RISK_POL
         result["position_sizing_rationale"] = (
             f"Position notional capped by {DEFAULT_SIZING_POLICY.max_risk_per_trade:.2%} capital risk "
             "and stop-loss distance; advisory sizing only, no trade is executed."
+        )
+    if dynamic_stop_loss is not None:
+        result["dynamic_stop_loss"] = dynamic_stop_loss
+        result["dynamic_stop_loss_rationale"] = (
+            f"Stop-loss derived from ATR at {float(atr_multiplier):.2f}x ATR; "
+            "advisory level only, no trade is executed."
         )
     if trade_levels is not None:
         result["trade_levels"] = trade_levels
