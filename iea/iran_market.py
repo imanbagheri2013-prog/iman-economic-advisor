@@ -238,10 +238,23 @@ def iran_factor_adapters(adapter: IranMarketAdapter):
         balance_score = max(0.0, min(100.0, 100.0 - abs(snap.depth_imbalance) * 100.0))
         return FactorResult(
             "liquidity", "OK", round(balance_score, 2), 0.75, adapter.provider,
-            details={"symbol": snap.symbol, "bid_depth_usd": snap.bid_depth, "ask_depth_usd": snap.ask_depth, "depth_imbalance": snap.depth_imbalance, "sample_count": snap.active_symbols},
+            details={"symbol": snap.symbol, "bid_depth_value": snap.bid_depth, "ask_depth_value": snap.ask_depth, "depth_imbalance": snap.depth_imbalance, "sample_count": snap.active_symbols},
         )
 
-    def unavailable_derivatives(name: str):
-        return FactorResult(name, "UNAVAILABLE", provider=adapter.provider, details={"reason": "not_applicable_to_iran_cash_equities"})
+    def open_interest(_: Any):
+        return FactorResult(
+            "open_interest",
+            "UNAVAILABLE",
+            provider=adapter.provider,
+            details={"reason": "not_applicable_to_iran_cash_equities"},
+        )
 
-    return trend, volume, liquidity, unavailable_derivatives, unavailable_derivatives
+    def funding_rate(_: Any):
+        return FactorResult(
+            "funding_rate",
+            "UNAVAILABLE",
+            provider=adapter.provider,
+            details={"reason": "not_applicable_to_iran_cash_equities"},
+        )
+
+    return trend, volume, liquidity, open_interest, funding_rate
