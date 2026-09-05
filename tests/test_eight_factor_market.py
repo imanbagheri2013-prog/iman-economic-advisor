@@ -78,10 +78,9 @@ def test_eight_factor_market_adapters_fill_six_factors(tmp_path):
     try:
         report = analyze_eight_factor(store, market, FakeSentiment())
         assert report["symbol"] == "BTCUSDT"
-        # Six market/sentiment factors are OK and the macro fundamental factor
-        # is also available from the current intelligence engine, while news
-        # remains unavailable without a live news snapshot in this test.
-        assert report["coverage"] == 0.875
+        # Six market/sentiment factors are OK; fundamental needs macro
+        # observations in the store, and news remains unavailable in this test.
+        assert report["coverage"] == 0.75
         assert report["score"] is not None
         assert report["regime"] in {"RISK_ON", "NEUTRAL", "RISK_OFF"}
         assert market.snapshot_calls == 1
@@ -103,7 +102,7 @@ def test_eight_factor_market_adapters_fill_six_factors(tmp_path):
         assert by_name["sentiment"]["details"]["value"] == 62.0
         assert by_name["sentiment"]["details"]["classification"] == "Greed"
         assert by_name["sentiment"]["details"]["change_1d"] == -7.0
-        assert by_name["fundamental"]["status"] == "OK"
+        assert by_name["fundamental"]["status"] == "UNAVAILABLE"
         assert by_name["news_risk"]["status"] == "UNAVAILABLE"
     finally:
         store.close()
@@ -113,13 +112,7 @@ def test_eight_factor_capital_flows_into_advisory_sizing(tmp_path):
     from iea.storage import Store
     store = Store(tmp_path / "capital.sqlite3")
     try:
-        report = analyze_eight_factor(
-            store,
-            FakeMarket(),
-            FakeSentiment(),
-            news_adapter=FailingNews(),
-            capital=100000000,
-        )
+        report = analyze_eight_factor(store, FakeMarket(), FakeSentiment(), news_adapter=FailingNews(), capital=100000000)
         assert report["decision"]["exposure_budget"] == 75000000.0
         assert report["decision"]["exposure_multiplier"] == 0.75
     finally:
@@ -127,20 +120,8 @@ def test_eight_factor_capital_flows_into_advisory_sizing(tmp_path):
 
 
 def test_market_confidence_uses_sample_depth():
-    full = FactorResult(
-        "trend",
-        "OK",
-        70.0,
-        provider="BINANCE_FUTURES",
-        details={"return_4h_pct": 1.0, "return_24h_pct": 2.0, "sample_count": 25},
-    )
-    partial = FactorResult(
-        "trend",
-        "OK",
-        70.0,
-        provider="BINANCE_FUTURES",
-        details={"return_4h_pct": 1.0, "return_24h_pct": 2.0, "sample_count": 5},
-    )
+    full = FactorResult("trend", "OK", 70.0, provider="BINANCE_FUTURES", details={"return_4h_pct": 1.0, "return_24h_pct": 2.0, "sample_count": 25})
+    partial = FactorResult("trend", "OK", 70.0, provider="BINANCE_FUTURES", details={"return_4h_pct": 1.0, "return_24h_pct": 2.0, "sample_count": 5})
     assert _dynamic_confidence(full) == 0.993
     assert _dynamic_confidence(partial) < _dynamic_confidence(full)
 
@@ -174,10 +155,7 @@ def test_resilient_market_adapter_falls_back_to_secondary():
     assert adapter.provider == "BYBIT_LINEAR"
 
 
-@pytest.mark.parametrize(
-    ("funding_rate", "expected_score", "expected_regime"),
-    [(0.0, 50.0, "NEUTRAL"), (0.0006, 16.0, "EXTREME_LONG"), (-0.0006, 84.0, "EXTREME_SHORT")],
-)
+@pytest.mark.parametrize(("funding_rate", "expected_score", "expected_regime"), [(0.0, 50.0, "NEUTRAL"), (0.0006, 16.0, "EXTREME_LONG"), (-0.0006, 84.0, "EXTREME_SHORT")])
 def test_funding_rate_crowding_extremes(tmp_path, funding_rate, expected_score, expected_regime):
     from iea.storage import Store
     store = Store(tmp_path / "funding.sqlite3")
