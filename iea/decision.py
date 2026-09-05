@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from .risk import DEFAULT_RISK_POLICY, RiskPolicy
-from .sizing import calculate_exposure_budget
+from .sizing import calculate_exposure_budget, calculate_position_size
 
 
 def _risk_assessment(report: dict[str, Any], policy: RiskPolicy = DEFAULT_RISK_POLICY) -> tuple[int, list[str]]:
@@ -104,8 +104,18 @@ def build_decision(report: dict[str, Any], policy: RiskPolicy = DEFAULT_RISK_POL
 
     capital = report.get("capital")
     exposure_budget = None
+    position_size = None
+    entry_price = report.get("entry_price")
+    stop_loss = report.get("stop_loss")
     if capital is not None:
         exposure_budget = calculate_exposure_budget(capital, exposure_multiplier)
+        if entry_price is not None and stop_loss is not None:
+            position_size = calculate_position_size(
+                capital,
+                exposure_multiplier,
+                entry_price,
+                stop_loss,
+            )
 
     result = {
         "action": action,
@@ -123,5 +133,11 @@ def build_decision(report: dict[str, Any], policy: RiskPolicy = DEFAULT_RISK_POL
         result["sizing_rationale"] = (
             f"capital-based advisory budget: {exposure_budget:.2f} from capital {float(capital):.2f} "
             f"at {exposure_multiplier:.0%} exposure; no trade is executed."
+        )
+    if position_size is not None:
+        result["position_size"] = position_size
+        result["position_sizing_rationale"] = (
+            f"Position notional capped by {DEFAULT_RISK_POLICY.max_risk_per_trade:.2%} capital risk "
+            "and stop-loss distance; advisory sizing only, no trade is executed."
         )
     return result
