@@ -1,6 +1,6 @@
 import pytest
 
-from iea.sizing import DEFAULT_SIZING_POLICY, SizingPolicy, calculate_exposure_budget, calculate_position_size
+from iea.sizing import DEFAULT_SIZING_POLICY, SizingPolicy, calculate_exposure_budget, calculate_position_size, calculate_take_profit, calculate_trade_levels
 
 
 def test_exposure_budget_scales_capital_by_advisory_multiplier():
@@ -36,12 +36,10 @@ def test_default_sizing_policy_is_immutable():
 
 
 def test_position_size_is_limited_by_stop_loss_risk():
-    # 1.5% of 100M = 1.5M risk; a 5% stop permits 30M notional.
     assert calculate_position_size(100_000_000, 1.0, 100_000, 95_000) == 30_000_000.0
 
 
 def test_position_size_is_capped_by_exposure_budget():
-    # Risk permits 30M, but 50% exposure caps notional at 50M; risk remains binding.
     assert calculate_position_size(100_000_000, 0.25, 100_000, 95_000) == 25_000_000.0
 
 
@@ -54,3 +52,30 @@ def test_position_size_rejects_invalid_prices():
         calculate_position_size(100_000, 1.0, 0, 95)
     with pytest.raises(ValueError):
         calculate_position_size(100_000, 1.0, 100, 100)
+
+
+def test_take_profit_for_buy_uses_two_to_one_risk_reward():
+    assert calculate_take_profit(100, 95, "BUY", 2.0) == 110.0
+
+
+def test_take_profit_for_sell_uses_two_to_one_risk_reward():
+    assert calculate_take_profit(100, 105, "SELL", 2.0) == 90.0
+
+
+def test_trade_levels_report_risk_reward():
+    levels = calculate_trade_levels(100, 95, "BUY", 3.0)
+    assert levels == {
+        "entry_price": 100.0,
+        "stop_loss": 95.0,
+        "take_profit": 115.0,
+        "risk_distance": 5.0,
+        "reward_distance": 15.0,
+        "risk_reward_ratio": 3.0,
+    }
+
+
+def test_trade_levels_reject_invalid_side_or_ratio():
+    with pytest.raises(ValueError):
+        calculate_take_profit(100, 95, "HOLD", 2.0)
+    with pytest.raises(ValueError):
+        calculate_take_profit(100, 95, "BUY", 0)
