@@ -5,6 +5,8 @@ from typing import Any
 
 import requests
 
+from .capital_flow import iran_money_flow_and_sector_rotation
+
 
 TSETMC_CDN = "https://cdn.tsetmc.com/api"
 TEDPIX_INSCODE = "32097828820363860"
@@ -29,15 +31,11 @@ class IranMarketSnapshot:
     breadth_down_pct: float | None
     total_symbols: int
     active_symbols: int
+    money_flow: dict[str, Any] | None = None
 
 
 class IranMarketAdapter:
-    """Read the Iran equity market as a whole from TSETMC public endpoints.
-
-    This adapter deliberately does not fabricate open-interest or funding data:
-    those crypto-derivatives factors are unavailable for the cash equity market
-    and are handled as UNAVAILABLE by the Iran factor adapter.
-    """
+    """Read the whole Iran cash-equity market from TSETMC public endpoints."""
 
     provider = "TSETMC_CDN"
 
@@ -55,7 +53,7 @@ class IranMarketAdapter:
         response.raise_for_status()
         payload = response.json()
         if isinstance(payload, dict):
-            for key in ("marketwatch", "marketOverview", "closingPriceDaily"):
+            for key in ("marketwatch", "marketOverview", "closingPriceDaily", "clientTypeAllDto"):
                 if key in payload:
                     return payload[key]
         return payload
@@ -82,6 +80,17 @@ class IranMarketAdapter:
             if value is not None and value > 0:
                 closes.append(value)
         return closes
+
+    @staticmethod
+    def _normalize_rows(payload: Any) -> list[dict[str, Any]]:
+        if isinstance(payload, list):
+            return [row for row in payload if isinstance(row, dict)]
+        if isinstance(payload, dict):
+            for key in ("marketwatch", "clientTypeAllDto", "clientTypeAll", "rows", "data"):
+                value = payload.get(key)
+                if isinstance(value, list):
+                    return [row for row in value if isinstance(row, dict)]
+        return []
 
     def snapshot(self) -> IranMarketSnapshot:
         overview = self._get("/MarketData/GetMarketOverview/1")
@@ -110,7 +119,7 @@ class IranMarketAdapter:
                 "RefID": 0,
             },
         )
-        rows = [row for row in watch if isinstance(row, dict)] if isinstance(watch, list) else []
+        rows = self._normalize_rows(watch)
 
         active = []
         total_volume = 0.0
@@ -160,6 +169,14 @@ class IranMarketAdapter:
         breadth_up = up / active_count * 100.0 if active_count else None
         breadth_down = down / active_count * 100.0 if active_count else None
 
+        money_flow: dict[str, Any] | None = None
+        try:
+            client_rows = self._normalize_rows(self._get("/ClientType/GetClientTypeAll"))
+            if client_rows:
+                money_flow = iran_money_flow_and_sector_rotation(rows, client_rows)
+        except (requests.RequestException, OSError, ValueError, KeyError, TypeError):
+            money_flow = None
+
         return IranMarketSnapshot(
             symbol=self.symbol,
             price=index_value,
@@ -178,6 +195,7 @@ class IranMarketAdapter:
             breadth_down_pct=breadth_down,
             total_symbols=len(rows),
             active_symbols=active_count,
+            money_flow=money_flow,
         )
 
 
@@ -242,19 +260,9 @@ def iran_factor_adapters(adapter: IranMarketAdapter):
         )
 
     def open_interest(_: Any):
-        return FactorResult(
-            "open_interest",
-            "UNAVAILABLE",
-            provider=adapter.provider,
-            details={"reason": "not_applicable_to_iran_cash_equities"},
-        )
+        return FactorResult("open_interest", "UNAVAILABLE", provider=adapter.provider, details={"reason": "not_applicable_to_iran_cash_equities"})
 
     def funding_rate(_: Any):
-        return FactorResult(
-            "funding_rate",
-            "UNAVAILABLE",
-            provider=adapter.provider,
-            details={"reason": "not_applicable_to_iran_cash_equities"},
-        )
+        return FactorResult("funding_rate", "UNAVAILABLE", provider=adapter.provider, details={"reason": "not_applicable_to_iran_cash_equities"})
 
     return trend, volume, liquidity, open_interest, funding_rate
