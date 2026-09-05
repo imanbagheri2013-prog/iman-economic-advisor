@@ -37,7 +37,14 @@ def equity_analysis():
 def test_equity_and_market_scores_are_combined_before_policy_gate():
     result = build_equity_market_decision(
         equity_analysis(),
-        {"score": 70, "coverage": 1.0, "factors": []},
+        {
+            "score": 70,
+            "coverage": 1.0,
+            "factors": [
+                {"name": "news_risk", "details": {"risk_regime": "LOW_RISK"}},
+                {"name": "liquidity", "details": {"depth_imbalance": 0.0}},
+            ],
+        },
     )
     assert result["equity_score"] > 70
     assert result["market_score"] == 70
