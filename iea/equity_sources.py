@@ -153,7 +153,7 @@ def fetch_live_equity_input(symbol: str, timeout: float = 15.0) -> LiveEquityInp
     eps = net_profit / shares
     if eps <= 0:
         raise ValueError(f"positive EPS required for PE valuation: {symbol}")
-    pe_value = eps * pe_multiple
+    pe_value = round(eps * pe_multiple, 10)
 
     return LiveEquityInput(
         snapshot=snapshot,
