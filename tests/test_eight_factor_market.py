@@ -101,6 +101,17 @@ def test_eight_factor_market_adapters_fill_six_factors(tmp_path):
         store.close()
 
 
+def test_eight_factor_capital_flows_into_advisory_sizing(tmp_path):
+    from iea.storage import Store
+    store = Store(tmp_path / "capital.sqlite3")
+    try:
+        report = analyze_eight_factor(store, FakeMarket(), FakeSentiment(), capital=100000000)
+        assert report["decision"]["exposure_budget"] == 50000000.0
+        assert report["decision"]["exposure_multiplier"] == 0.5
+    finally:
+        store.close()
+
+
 def test_market_confidence_uses_sample_depth():
     full = FactorResult(
         "trend",
