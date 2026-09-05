@@ -1,0 +1,76 @@
+market:
+  name: iran_equities
+  venues:
+    - Tehran Stock Exchange
+    - Iran Fara Bourse
+  data_priority:
+    - TSE/TSETMC official REST/API
+    - Codal issuer disclosures
+    - regulated exchange data
+    - validated secondary sources
+
+universe:
+  include:
+    - common_stocks
+    - listed_investment_companies
+    - sector_indices
+  exclude:
+    - warrants
+    - rights_only
+    - inactive_instruments
+  refresh: daily
+
+fundamentals:
+  required:
+    - revenue
+    - gross_profit
+    - operating_profit
+    - net_profit
+    - eps
+    - operating_cash_flow
+    - capex
+    - total_debt
+    - cash
+    - equity
+    - shares_outstanding
+  quality_metrics:
+    - gross_margin
+    - operating_margin
+    - net_margin
+    - roe
+    - roa
+    - roic
+    - debt_to_equity
+    - free_cash_flow
+    - working_capital
+
+valuation:
+  methods:
+    - dcf_fcff
+    - dcf_fcfe
+    - pe
+    - ev_ebitda
+    - pb
+    - ps
+    - asset_value
+    - replacement_value
+    - sotp
+  scenarios:
+    - bear
+    - base
+    - bull
+  policy:
+    advisory_only: true
+    require_source_cross_check: true
+    never_execute_trades: true
+    report_intervals: true
+
+ranking:
+  factors:
+    valuation: 0.30
+    earnings_quality: 0.20
+    growth: 0.15
+    balance_sheet: 0.10
+    cash_flow: 0.10
+    macro_sector_fit: 0.10
+    market_liquidity: 0.05
