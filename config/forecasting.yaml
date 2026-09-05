@@ -1,0 +1,43 @@
+targets:
+  usd_irr_market:
+    label: Iranian market USD/IRR
+    horizon_days: [1, 7, 30]
+    domestic_sources: [central_bank_iran, statistical_center_iran, market_observations]
+    international_sources: [imf, world_bank, bis]
+  gold_usd_oz:
+    label: Gold USD per troy ounce
+    horizon_days: [1, 7, 30]
+    domestic_sources: [central_bank_iran, market_observations]
+    international_sources: [imf, world_bank, lbma]
+  inflation_iran:
+    label: Iran inflation
+    horizon_months: [1, 3, 6, 12]
+    domestic_sources: [statistical_center_iran, central_bank_iran]
+    international_sources: [imf, world_bank]
+  inflation_global:
+    label: Global inflation
+    horizon_months: [1, 3, 6, 12]
+    domestic_sources: []
+    international_sources: [imf, world_bank, oecd, bis]
+
+methodology:
+  time_series_models: [exponential_smoothing, ar1]
+  ensemble: backtest_weighted
+  uncertainty: rolling_backtest_error
+  economic_features:
+    - inflation_differential
+    - interest_rate_differential
+    - money_supply_growth
+    - fiscal_balance
+    - oil_price
+    - commodity_prices
+    - exchange_rate
+    - output_growth
+    - liquidity
+    - geopolitical_risk
+
+policy:
+  forecast_is_advisory: true
+  never_execute_trades: true
+  require_source_crosscheck: true
+  minimum_independent_sources: 2
