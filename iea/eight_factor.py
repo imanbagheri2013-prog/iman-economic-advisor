@@ -104,6 +104,7 @@ def analyze_eight_factor(
     market_adapter: Any | None = None,
     sentiment_adapter: AlternativeFearGreedAdapter | None = None,
     news_adapter: GDELTNewsAdapter | None = None,
+    capital: float | None = None,
 ) -> dict[str, Any]:
     registry = FactorRegistry()
     registry.register("fundamental", _fundamental_adapter)
@@ -133,7 +134,10 @@ def analyze_eight_factor(
     ]
     summary = aggregate(results)
     factor_dicts = [result.as_dict() for result in results]
-    decision = build_decision({**summary, "factors": factor_dicts})
+    decision_input = {**summary, "factors": factor_dicts}
+    if capital is not None:
+        decision_input["capital"] = capital
+    decision = build_decision(decision_input)
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "engine": "eight_factor_market_intelligence_v2",
