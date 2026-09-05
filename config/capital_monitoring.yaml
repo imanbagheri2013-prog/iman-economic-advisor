@@ -1,0 +1,105 @@
+monitoring:
+  mandate: global_capital_allocation_and_central_bank_watch
+  objectives:
+    - track_where_major_financial_institutions_allocate_capital
+    - track_central_bank_reserve_composition_and_balance_sheet_changes
+    - detect_gold_commodity_currency_and_sovereign_asset_accumulation
+    - explain_likely_economic_or_geopolitical_motives
+    - cross_check_official_data_with_independent_research
+
+central_banks:
+  - Federal Reserve
+  - European Central Bank
+  - People's Bank of China
+  - Bank of Japan
+  - Bank of England
+  - Swiss National Bank
+  - Reserve Bank of India
+  - Bank of Canada
+  - Reserve Bank of Australia
+  - Central Bank of Russia
+  - Central Bank of Türkiye
+  - Central Bank of the Republic of Iran
+
+institution_types:
+  - central_bank
+  - sovereign_wealth_fund
+  - pension_fund
+  - commercial_bank
+  - investment_bank
+  - asset_manager
+  - insurance_company
+  - commodity_trader
+  - government_treasury
+  - multilateral_institution
+
+asset_themes:
+  - gold
+  - foreign_currency_reserves
+  - government_bonds
+  - equities
+  - corporate_credit
+  - commodities
+  - energy
+  - agriculture
+  - industrial_metals
+  - real_estate
+  - cash_and_deposits
+  - crypto_assets
+
+source_tiers:
+  tier_1_official:
+    - central_bank_publications
+    - treasury_publications
+    - IMF
+    - BIS
+    - World Bank
+    - OECD
+    - national_statistics
+  tier_2_market_infrastructure:
+    - LBMA
+    - major_exchange_data
+    - regulated_filings
+  tier_3_research:
+    - academic_research
+    - major_research_centers
+    - bank_research
+    - reputable_newswire
+
+required_metadata:
+  - observation_date
+  - publication_date
+  - institution
+  - country
+  - institution_type
+  - asset
+  - action
+  - value
+  - currency
+  - source
+  - reason
+  - confidence
+
+interpretation:
+  accumulation_signal: positive_net_allocation
+  reduction_signal: negative_net_allocation
+  motive_tags:
+    - inflation_hedge
+    - currency_diversification
+    - liquidity_management
+    - reserve_adequacy
+    - interest_rate_view
+    - growth_view
+    - geopolitical_hedge
+    - sanctions_risk
+    - food_security
+    - energy_security
+    - strategic_stockpiling
+    - valuation
+    - balance_of_payments_support
+
+policy:
+  advisory_only: true
+  never_infer_intent_as_fact: true
+  require_source_crosscheck: true
+  separate_observation_from_interpretation: true
