@@ -5,15 +5,27 @@ from zoneinfo import ZoneInfo
 
 from iea.iran_market import IranMarketAdapter, iran_factor_adapters
 
-
 TEHRAN = ZoneInfo("Asia/Tehran")
+OPEN_NOW = datetime(2026, 9, 5, 10, 0, tzinfo=TEHRAN)
 
 
 def test_iran_market_session_state():
-    assert IranMarketAdapter.session_state(datetime(2026, 9, 5, 10, 0, tzinfo=TEHRAN)) == ("OPEN", "2026-09-05")
+    assert IranMarketAdapter.session_state(OPEN_NOW) == ("OPEN", "2026-09-05")
     assert IranMarketAdapter.session_state(datetime(2026, 9, 5, 8, 50, tzinfo=TEHRAN)) == ("PRE_OPEN", "2026-09-05")
     assert IranMarketAdapter.session_state(datetime(2026, 9, 5, 13, 0, tzinfo=TEHRAN)) == ("CLOSED", "2026-09-05")
     assert IranMarketAdapter.session_state(datetime(2026, 9, 3, 10, 0, tzinfo=TEHRAN)) == ("CLOSED", "2026-09-03")
+
+
+def test_iran_market_skips_live_polling_when_closed(monkeypatch):
+    def fail_get(*args, **kwargs):
+        raise AssertionError("TSETMC must not be polled outside the regular cash session")
+
+    monkeypatch.setattr("requests.get", fail_get)
+    adapter = IranMarketAdapter(now_provider=lambda: datetime(2026, 9, 5, 13, 0, tzinfo=TEHRAN))
+    trend, volume, liquidity, _, _ = iran_factor_adapters(adapter)
+    assert trend(None).status == "UNAVAILABLE"
+    assert volume(None).status == "UNAVAILABLE"
+    assert liquidity(None).status == "UNAVAILABLE"
 
 
 def test_iran_market_snapshot_and_factors(monkeypatch):
@@ -39,7 +51,6 @@ def test_iran_market_snapshot_and_factors(monkeypatch):
         class Response:
             def raise_for_status(self):
                 return None
-
             def json(self):
                 if url.endswith("/MarketData/GetMarketOverview/1"):
                     return {"marketOverview": {"indexLastValue": 1100, "indexChange": 1.85}}
@@ -50,12 +61,11 @@ def test_iran_market_snapshot_and_factors(monkeypatch):
                 if "GetClosingPriceDailyList" in url:
                     return {"closingPriceDaily": index_rows}
                 raise AssertionError(url)
-
         return Response()
 
     monkeypatch.setattr("requests.get", fake_get)
-    snapshot = IranMarketAdapter().snapshot(now=datetime(2026, 9, 5, 10, 0, tzinfo=TEHRAN))
-
+    adapter = IranMarketAdapter(now_provider=lambda: OPEN_NOW)
+    snapshot = adapter.snapshot()
     assert snapshot.symbol == "IRAN_MARKET"
     assert snapshot.market_status == "OPEN"
     assert snapshot.session_date == "2026-09-05"
@@ -70,15 +80,9 @@ def test_iran_market_snapshot_and_factors(monkeypatch):
     assert snapshot.money_flow["market_direction"] == "INFLOW"
     assert snapshot.money_flow["top_inflow_sectors"][0]["sector"] == "فلزات اساسی"
 
-    trend, volume, liquidity, oi, funding = iran_factor_adapters(IranMarketAdapter())
-    trend_result = trend(None)
-    volume_result = volume(None)
-    liquidity_result = liquidity(None)
-    oi_result = oi(None)
-    funding_result = funding(None)
-
-    assert trend_result.status == "OK"
-    assert volume_result.status == "OK"
-    assert liquidity_result.status == "OK"
-    assert oi_result.status == "UNAVAILABLE"
-    assert funding_result.status == "UNAVAILABLE"
+    trend, volume, liquidity, oi, funding = iran_factor_adapters(IranMarketAdapter(now_provider=lambda: OPEN_NOW))
+    assert trend(None).status == "OK"
+    assert volume(None).status == "OK"
+    assert liquidity(None).status == "OK"
+    assert oi(None).status == "UNAVAILABLE"
+    assert funding(None).status == "UNAVAILABLE"
