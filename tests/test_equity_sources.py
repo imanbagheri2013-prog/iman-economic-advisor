@@ -3,28 +3,32 @@ from __future__ import annotations
 from iea.equity_sources import fetch_live_equity_input
 
 
-def test_fetch_live_equity_input_uses_sec_and_stooq(monkeypatch):
+def test_fetch_live_equity_input_uses_real_sec_shape_and_stooq(monkeypatch):
     tickers = {"0": {"ticker": "TEST", "cik_str": 12345}}
     facts = {
         "facts": {
             "us-gaap": {
-                "RevenueFromContractWithCustomerExcludingAssessedTax": {"USD": {"units": [
+                "RevenueFromContractWithCustomerExcludingAssessedTax": {"label": "Revenue", "units": {"USD": [
                     {"val": 1200, "form": "10-K", "end": "2025-12-31", "filed": "2026-02-01"},
                     {"val": 1000, "form": "10-K", "end": "2024-12-31", "filed": "2025-02-01"},
                 ]}},
-                "GrossProfit": {"USD": {"units": [{"val": 480, "form": "10-K", "end": "2025-12-31", "filed": "2026-02-01"}]}},
-                "OperatingIncomeLoss": {"USD": {"units": [{"val": 240, "form": "10-K", "end": "2025-12-31", "filed": "2026-02-01"}]}},
-                "NetIncomeLoss": {"USD": {"units": [
+                "GrossProfit": {"units": {"USD": [{"val": 480, "form": "10-K", "end": "2025-12-31", "filed": "2026-02-01"}]}},
+                "OperatingIncomeLoss": {"units": {"USD": [{"val": 240, "form": "10-K", "end": "2025-12-31", "filed": "2026-02-01"}]}},
+                "NetIncomeLoss": {"units": {"USD": [
                     {"val": 144, "form": "10-K", "end": "2025-12-31", "filed": "2026-02-01"},
                     {"val": 120, "form": "10-K", "end": "2024-12-31", "filed": "2025-02-01"},
                 ]}},
-                "NetCashProvidedByUsedInOperatingActivities": {"USD": {"units": [{"val": 200, "form": "10-K", "end": "2025-12-31", "filed": "2026-02-01"}]}},
-                "PaymentsToAcquirePropertyPlantAndEquipment": {"USD": {"units": [{"val": 60, "form": "10-K", "end": "2025-12-31", "filed": "2026-02-01"}]}},
-                "LongTermDebtNoncurrent": {"USD": {"units": [{"val": 150, "form": "10-K", "end": "2025-12-31", "filed": "2026-02-01"}]}},
-                "CashAndCashEquivalentsAtCarryingValue": {"USD": {"units": [{"val": 100, "form": "10-K", "end": "2025-12-31", "filed": "2026-02-01"}]}},
-                "StockholdersEquity": {"USD": {"units": [{"val": 800, "form": "10-K", "end": "2025-12-31", "filed": "2026-02-01"}]}},
-                "EntityCommonStockSharesOutstanding": {"shares": {"units": [{"val": 100, "form": "10-K", "end": "2025-12-31", "filed": "2026-02-01"}]}},
-            }
+                "NetCashProvidedByUsedInOperatingActivities": {"units": {"USD": [{"val": 200, "form": "10-K", "end": "2025-12-31", "filed": "2026-02-01"}]}},
+                "PaymentsToAcquirePropertyPlantAndEquipment": {"units": {"USD": [{"val": 60, "form": "10-K", "end": "2025-12-31", "filed": "2026-02-01"}]}},
+                "LongTermDebtNoncurrent": {"units": {"USD": [{"val": 150, "form": "10-K", "end": "2025-12-31", "filed": "2026-02-01"}]}},
+                "CashAndCashEquivalentsAtCarryingValue": {"units": {"USD": [{"val": 100, "form": "10-K", "end": "2025-12-31", "filed": "2026-02-01"}]}},
+                "StockholdersEquity": {"units": {"USD": [{"val": 800, "form": "10-K", "end": "2025-12-31", "filed": "2026-02-01"}]}},
+            },
+            "dei": {
+                "EntityCommonStockSharesOutstanding": {"units": {"shares": [
+                    {"val": 100, "form": "10-K", "end": "2025-12-31", "filed": "2026-02-01"},
+                ]}},
+            },
         }
     }
 
