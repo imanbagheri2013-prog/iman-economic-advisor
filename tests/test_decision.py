@@ -1,22 +1,50 @@
 from iea.decision import build_decision
 
 
+def _safe_factors():
+    return [
+        {"name": "news_risk", "details": {"risk_regime": "LOW_RISK"}},
+        {"name": "liquidity", "details": {"depth_imbalance": 0.0}},
+    ]
+
+
 def test_insufficient_coverage_is_no_trade_with_low_risk_budget():
-    result = build_decision({"score": 80, "coverage": 0.5, "regime": "RISK_ON"})
+    result = build_decision(
+        {
+            "score": 80,
+            "coverage": 0.5,
+            "regime": "RISK_ON",
+            "factors": _safe_factors(),
+        }
+    )
     assert result["action"] == "NO_TRADE"
     assert result["risk_tier"] == "LOW"
     assert result["exposure_multiplier"] == 1.0
 
 
 def test_risk_on_decisive_score_is_buy_bias():
-    result = build_decision({"score": 80, "coverage": 0.8, "regime": "RISK_ON"})
+    result = build_decision(
+        {
+            "score": 80,
+            "coverage": 0.8,
+            "regime": "RISK_ON",
+            "factors": _safe_factors(),
+        }
+    )
     assert result["action"] == "BUY_BIAS"
     assert result["risk_tier"] == "LOW"
     assert result["exposure_multiplier"] == 1.0
 
 
 def test_risk_off_decisive_score_is_sell_bias():
-    result = build_decision({"score": 20, "coverage": 0.8, "regime": "RISK_OFF"})
+    result = build_decision(
+        {
+            "score": 20,
+            "coverage": 0.8,
+            "regime": "RISK_OFF",
+            "factors": _safe_factors(),
+        }
+    )
     assert result["action"] == "SELL_BIAS"
     assert result["risk_tier"] == "LOW"
     assert result["risk_multiplier"] == 1.0
@@ -24,7 +52,14 @@ def test_risk_off_decisive_score_is_sell_bias():
 
 
 def test_neutral_score_is_hold():
-    result = build_decision({"score": 50, "coverage": 0.8, "regime": "NEUTRAL"})
+    result = build_decision(
+        {
+            "score": 50,
+            "coverage": 0.8,
+            "regime": "NEUTRAL",
+            "factors": _safe_factors(),
+        }
+    )
     assert result["action"] == "HOLD"
     assert result["risk_tier"] == "LOW"
     assert result["exposure_multiplier"] == 1.0
