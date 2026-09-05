@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, time
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -10,6 +12,9 @@ from .capital_flow import iran_money_flow_and_sector_rotation
 
 TSETMC_CDN = "https://cdn.tsetmc.com/api"
 TEDPIX_INSCODE = "32097828820363860"
+TEHRAN_TZ = ZoneInfo("Asia/Tehran")
+MARKET_OPEN = time(9, 0)
+MARKET_CLOSE = time(12, 30)
 
 
 @dataclass(frozen=True)
@@ -31,6 +36,8 @@ class IranMarketSnapshot:
     breadth_down_pct: float | None
     total_symbols: int
     active_symbols: int
+    market_status: str = "UNKNOWN"
+    session_date: str | None = None
     money_flow: dict[str, Any] | None = None
 
 
@@ -42,6 +49,24 @@ class IranMarketAdapter:
     def __init__(self, timeout: float = 15.0) -> None:
         self.timeout = timeout
         self.symbol = "IRAN_MARKET"
+
+    @staticmethod
+    def session_state(now: datetime | None = None) -> tuple[str, str]:
+        """Return OPEN/PRE_OPEN/CLOSED using Tehran local time.
+
+        Thursday/Friday are treated as closed. Holidays are intentionally not
+        inferred here; a live TSETMC response with no active rows is authoritative.
+        """
+        current = (now or datetime.now(TEHRAN_TZ)).astimezone(TEHRAN_TZ)
+        if current.weekday() in (3, 4):
+            return "CLOSED", current.date().isoformat()
+        if current.time() < time(8, 45):
+            return "CLOSED", current.date().isoformat()
+        if current.time() < MARKET_OPEN:
+            return "PRE_OPEN", current.date().isoformat()
+        if current.time() <= MARKET_CLOSE:
+            return "OPEN", current.date().isoformat()
+        return "CLOSED", current.date().isoformat()
 
     def _get(self, path: str, params: dict[str, Any] | None = None) -> Any:
         response = requests.get(
@@ -92,7 +117,9 @@ class IranMarketAdapter:
                     return [row for row in value if isinstance(row, dict)]
         return []
 
-    def snapshot(self) -> IranMarketSnapshot:
+    def snapshot(self, now: datetime | None = None) -> IranMarketSnapshot:
+        market_status, session_date = self.session_state(now)
+
         overview = self._get("/MarketData/GetMarketOverview/1")
         if isinstance(overview, list):
             overview = overview[0] if overview else {}
@@ -195,6 +222,8 @@ class IranMarketAdapter:
             breadth_down_pct=breadth_down,
             total_symbols=len(rows),
             active_symbols=active_count,
+            market_status=market_status,
+            session_date=session_date,
             money_flow=money_flow,
         )
 
@@ -230,10 +259,7 @@ def iran_factor_adapters(adapter: IranMarketAdapter):
         if snap.return_1d_pct is None or snap.return_20d_pct is None:
             return FactorResult("trend", "UNAVAILABLE", provider=adapter.provider)
         score = max(0.0, min(100.0, 50.0 + snap.return_1d_pct * 3.0 + snap.return_20d_pct * 1.5))
-        return FactorResult(
-            "trend", "OK", round(score, 2), 0.9, adapter.provider,
-            details={"symbol": snap.symbol, "return_1d_pct": round(snap.return_1d_pct, 4), "return_20d_pct": round(snap.return_20d_pct, 4), "sample_count": 21},
-        )
+        return FactorResult("trend", "OK", round(score, 2), 0.9, adapter.provider, details={"symbol": snap.symbol, "return_1d_pct": round(snap.return_1d_pct, 4), "return_20d_pct": round(snap.return_20d_pct, 4), "sample_count": 21})
 
     def volume(_: Any):
         snap = get_snapshot()
@@ -242,10 +268,7 @@ def iran_factor_adapters(adapter: IranMarketAdapter):
         if snap.volume <= 0 or snap.active_symbols <= 0:
             return FactorResult("volume", "UNAVAILABLE", provider=adapter.provider)
         score = min(100.0, 50.0 + (snap.breadth_up_pct or 0.0) * 0.25 - (snap.breadth_down_pct or 0.0) * 0.15)
-        return FactorResult(
-            "volume", "OK", round(score, 2), 0.75, adapter.provider,
-            details={"symbol": snap.symbol, "market_volume": snap.volume, "market_value": snap.quote_volume, "breadth_up_pct": snap.breadth_up_pct, "breadth_down_pct": snap.breadth_down_pct, "sample_count": snap.active_symbols},
-        )
+        return FactorResult("volume", "OK", round(score, 2), 0.75, adapter.provider, details={"symbol": snap.symbol, "market_volume": snap.volume, "market_value": snap.quote_volume, "breadth_up_pct": snap.breadth_up_pct, "breadth_down_pct": snap.breadth_down_pct, "sample_count": snap.active_symbols})
 
     def liquidity(_: Any):
         snap = get_snapshot()
@@ -254,10 +277,7 @@ def iran_factor_adapters(adapter: IranMarketAdapter):
         if snap.bid_depth is None or snap.ask_depth is None or snap.depth_imbalance is None:
             return FactorResult("liquidity", "UNAVAILABLE", provider=adapter.provider)
         balance_score = max(0.0, min(100.0, 100.0 - abs(snap.depth_imbalance) * 100.0))
-        return FactorResult(
-            "liquidity", "OK", round(balance_score, 2), 0.75, adapter.provider,
-            details={"symbol": snap.symbol, "bid_depth_value": snap.bid_depth, "ask_depth_value": snap.ask_depth, "depth_imbalance": snap.depth_imbalance, "sample_count": snap.active_symbols},
-        )
+        return FactorResult("liquidity", "OK", round(balance_score, 2), 0.75, adapter.provider, details={"symbol": snap.symbol, "bid_depth_value": snap.bid_depth, "ask_depth_value": snap.ask_depth, "depth_imbalance": snap.depth_imbalance, "sample_count": snap.active_symbols})
 
     def open_interest(_: Any):
         return FactorResult("open_interest", "UNAVAILABLE", provider=adapter.provider, details={"reason": "not_applicable_to_iran_cash_equities"})
