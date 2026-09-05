@@ -34,9 +34,10 @@ jobs:
           BLS_END_YEAR: "2026"
           IEA_DB_PATH: "data/iea.sqlite3"
           IEA_CAPITAL: ${{ vars.IEA_CAPITAL }}
+          IEA_EQUITY_INPUT_PATH: "config/equity_input.json"
         run: python -m iea.scheduler
 
-      - name: Upload health report
+      - name: Upload scheduler report
         if: always()
         uses: actions/upload-artifact@v4
         with:
