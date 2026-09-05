@@ -25,27 +25,31 @@ def test_aggregate_requires_minimum_coverage():
         *[FactorResult(name, "UNAVAILABLE") for name in FACTOR_NAMES[1:]],
     ]
     report = aggregate(results)
-    assert report == {
-        "score": None,
-        "regime": "INSUFFICIENT_DATA",
-        "coverage": 0.125,
-        "available_factors": ["fundamental"],
-        "unavailable_factors": list(FACTOR_NAMES[1:]),
-    }
+    assert report["score"] is None
+    assert report["regime"] == "INSUFFICIENT_DATA"
+    assert report["coverage"] == 0.125
+    assert report["available_factors"] == ["fundamental"]
+    assert report["unavailable_factors"] == list(FACTOR_NAMES[1:])
+    assert report["data_quality"]["score"] == 12.5
+    assert report["data_quality"]["status"] == "DEGRADED"
+    assert report["data_quality"]["usable_factor_count"] == 1
+    assert report["data_quality"]["not_applicable_count"] == 0
 
 
 def test_aggregate_with_full_coverage():
     results = [FactorResult(name, "OK", 75.0) for name in FACTOR_NAMES]
     report = aggregate(results)
-    assert report == {
-        "score": 75.0,
-        "regime": "RISK_ON",
-        "factor_weights": {name: 0.125 for name in FACTOR_NAMES},
-        "factor_contributions": {name: 9.38 for name in FACTOR_NAMES},
-        "coverage": 1.0,
-        "available_factors": list(FACTOR_NAMES),
-        "unavailable_factors": [],
-    }
+    assert report["score"] == 75.0
+    assert report["regime"] == "RISK_ON"
+    assert report["factor_weights"] == {name: 0.125 for name in FACTOR_NAMES}
+    assert report["factor_contributions"] == {name: 9.38 for name in FACTOR_NAMES}
+    assert report["coverage"] == 1.0
+    assert report["available_factors"] == list(FACTOR_NAMES)
+    assert report["unavailable_factors"] == []
+    assert report["data_quality"]["score"] == 100.0
+    assert report["data_quality"]["status"] == "GOOD"
+    assert report["data_quality"]["usable_factor_count"] == 8
+    assert report["data_quality"]["applicable_factor_count"] == 8
 
 
 def test_aggregate_weights_scores_by_confidence():
