@@ -164,3 +164,62 @@ def test_critical_risk_zeroes_stop_loss_position_size():
     result = build_decision(report)
     assert result["action"] == "NO_TRADE"
     assert result["position_size"] == 0.0
+
+
+def test_buy_decision_generates_two_to_one_trade_levels():
+    report = {
+        "score": 80,
+        "coverage": 1.0,
+        "regime": "RISK_ON",
+        "capital": 100000000,
+        "entry_price": 100000,
+        "stop_loss": 95000,
+        "risk_reward_ratio": 2.0,
+        "factors": _safe_factors(),
+    }
+    result = build_decision(report)
+    assert result["action"] == "BUY_BIAS"
+    assert result["trade_levels"] == {
+        "entry_price": 100000.0,
+        "stop_loss": 95000.0,
+        "take_profit": 110000.0,
+        "risk_distance": 5000.0,
+        "reward_distance": 10000.0,
+        "risk_reward_ratio": 2.0,
+    }
+    assert "risk/reward" in result["trade_levels_rationale"]
+
+
+def test_sell_decision_generates_custom_risk_reward_trade_levels():
+    report = {
+        "score": 20,
+        "coverage": 1.0,
+        "regime": "RISK_OFF",
+        "capital": 100000000,
+        "entry_price": 100000,
+        "stop_loss": 105000,
+        "risk_reward_ratio": 3.0,
+        "factors": _safe_factors(),
+    }
+    result = build_decision(report)
+    assert result["action"] == "SELL_BIAS"
+    assert result["trade_levels"]["take_profit"] == 85000.0
+    assert result["trade_levels"]["risk_reward_ratio"] == 3.0
+
+
+def test_no_trade_does_not_publish_actionable_trade_levels():
+    report = {
+        "score": 80,
+        "coverage": 1.0,
+        "regime": "RISK_ON",
+        "capital": 100000000,
+        "entry_price": 100000,
+        "stop_loss": 95000,
+        "factors": [
+            {"name": "news_risk", "details": {"risk_regime": "HIGH_RISK"}},
+            {"name": "liquidity", "details": {"depth_imbalance": 0.0}},
+        ],
+    }
+    result = build_decision(report)
+    assert result["action"] == "NO_TRADE"
+    assert "trade_levels" not in result
