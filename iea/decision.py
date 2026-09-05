@@ -91,6 +91,22 @@ def _exposure_multiplier(risk_tier: str) -> float:
     }.get(risk_tier, 0.0)
 
 
+def _risk_rationale(risk_score: int, risk_tier: str, risk_flags: list[str]) -> str:
+    if not risk_flags:
+        return f"Risk score {risk_score}/100: no material risk flags; {risk_tier} risk budget applies."
+    labels = ", ".join(risk_flags)
+    return f"Risk score {risk_score}/100: {labels}; {risk_tier} risk budget applies."
+
+
+def _exposure_rationale(risk_tier: str, exposure_multiplier: float) -> str:
+    if exposure_multiplier <= 0.0:
+        return "Advisory exposure budget is 0% because the risk tier is CRITICAL."
+    return (
+        f"Advisory exposure budget is {exposure_multiplier:.0%} for {risk_tier} risk; "
+        "this is a sizing constraint only and never executes a trade."
+    )
+
+
 def build_decision(report: dict[str, Any]) -> dict[str, Any]:
     score = report.get("score")
     coverage = float(report.get("coverage", 0.0) or 0.0)
@@ -107,6 +123,8 @@ def build_decision(report: dict[str, Any]) -> dict[str, Any]:
         "risk_multiplier": risk_multiplier,
         "exposure_multiplier": exposure_multiplier,
         "risk_flags": risk_flags,
+        "risk_rationale": _risk_rationale(risk_score, risk_tier, risk_flags),
+        "exposure_rationale": _exposure_rationale(risk_tier, exposure_multiplier),
     }
 
     if score is None or coverage < MIN_COVERAGE:
