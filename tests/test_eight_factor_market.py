@@ -76,10 +76,11 @@ def test_eight_factor_market_adapters_fill_six_factors(tmp_path):
     store = Store(tmp_path / "eight.sqlite3")
     market = FakeMarket()
     try:
-        report = analyze_eight_factor(store, market, FakeSentiment())
+        # Keep this unit test deterministic: news is intentionally unavailable.
+        report = analyze_eight_factor(store, market, FakeSentiment(), news_adapter=FailingNews())
         assert report["symbol"] == "BTCUSDT"
         # Six market/sentiment factors are OK; fundamental needs macro
-        # observations in the store, and news remains unavailable in this test.
+        # observations in the store, and news is intentionally unavailable.
         assert report["coverage"] == 0.75
         assert report["score"] is not None
         assert report["regime"] in {"RISK_ON", "NEUTRAL", "RISK_OFF"}
