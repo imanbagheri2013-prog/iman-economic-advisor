@@ -2,69 +2,53 @@ from __future__ import annotations
 
 from typing import Any
 
-from iea.risk import DEFAULT_RISK_POLICY, RiskPolicy
-
-
-def _factor_details(report: dict[str, Any], name: str) -> dict[str, Any]:
-    for factor in report.get("factors", []):
-        if str(factor.get("name", "")).lower() == name.lower():
-            details = factor.get("details")
-            return details if isinstance(details, dict) else {}
-    return {}
+from .risk import DEFAULT_RISK_POLICY, RiskPolicy
+from .sizing import calculate_exposure_budget
 
 
 def _risk_assessment(report: dict[str, Any], policy: RiskPolicy = DEFAULT_RISK_POLICY) -> tuple[int, list[str]]:
     score = 0
     flags: list[str] = []
+    factors = report.get("factors") or []
+    by_name = {factor.get("name"): factor for factor in factors if isinstance(factor, dict)}
 
-    news = _factor_details(report, "news_risk")
-    if not news:
+    news = by_name.get("news_risk", {}).get("details") or {}
+    news_regime = news.get("risk_regime")
+    if news_regime is None:
         score += policy.unavailable_news_points
         flags.append("news_risk_unavailable")
-    else:
-        regime = str(news.get("risk_regime", "")).upper()
-        if regime == "HIGH_RISK":
-            score += policy.high_news_risk_points
-            flags.append("high_news_risk")
-        elif regime == "ELEVATED_RISK":
-            score += policy.elevated_news_risk_points
-            flags.append("elevated_news_risk")
+    elif news_regime == "HIGH_RISK":
+        score += policy.high_news_risk_points
+        flags.append("high_news_risk")
+    elif news_regime == "ELEVATED_RISK":
+        score += policy.elevated_news_risk_points
+        flags.append("elevated_news_risk")
 
-    liquidity = _factor_details(report, "liquidity")
-    if not liquidity:
+    liquidity = by_name.get("liquidity", {}).get("details") or {}
+    imbalance = liquidity.get("depth_imbalance")
+    if imbalance is None:
         score += policy.unavailable_liquidity_points
         flags.append("liquidity_unavailable")
-    else:
-        try:
-            imbalance = abs(float(liquidity.get("depth_imbalance", 0.0)))
-        except (TypeError, ValueError):
-            imbalance = 0.0
-        if imbalance >= policy.extreme_liquidity_imbalance:
-            score += policy.extreme_liquidity_points
-            flags.append("extreme_liquidity_imbalance")
+    elif abs(float(imbalance)) >= policy.extreme_liquidity_imbalance:
+        score += policy.extreme_liquidity_points
+        flags.append("extreme_liquidity_imbalance")
 
-    funding = _factor_details(report, "funding_rate")
-    try:
-        funding_pct = abs(float(funding.get("funding_rate_pct", 0.0)))
-    except (TypeError, ValueError):
-        funding_pct = 0.0
-    if funding_pct >= policy.extreme_funding_rate_pct:
+    funding = by_name.get("funding_rate", {}).get("details") or {}
+    funding_rate = funding.get("funding_rate_pct")
+    if funding_rate is not None and abs(float(funding_rate)) >= policy.extreme_funding_rate_pct:
         score += policy.extreme_funding_points
         flags.append("extreme_funding_crowding")
 
-    oi = _factor_details(report, "open_interest")
-    trend = _factor_details(report, "trend")
-    try:
-        oi_change = abs(float(oi.get("oi_change_pct_1h", 0.0)))
-        trend_change = abs(float(trend.get("return_4h_pct", 0.0)))
-        oi_sign = float(oi.get("oi_change_pct_1h", 0.0))
-        trend_sign = float(trend.get("return_4h_pct", 0.0))
-    except (TypeError, ValueError):
-        oi_change = trend_change = oi_sign = trend_sign = 0.0
+    oi = by_name.get("open_interest", {}).get("details") or {}
+    trend = by_name.get("trend", {}).get("details") or {}
+    oi_change = oi.get("oi_change_pct_1h")
+    trend_return = trend.get("return_4h_pct")
     if (
-        oi_change >= policy.oi_divergence_threshold_pct
-        and trend_change >= policy.trend_divergence_threshold_pct
-        and oi_sign * trend_sign < 0
+        oi_change is not None
+        and trend_return is not None
+        and abs(float(oi_change)) >= policy.oi_divergence_threshold_pct
+        and abs(float(trend_return)) >= policy.trend_divergence_threshold_pct
+        and float(oi_change) * float(trend_return) < 0
     ):
         score += policy.oi_trend_divergence_points
         flags.append("oi_trend_divergence")
@@ -77,61 +61,67 @@ def _risk_tier(risk_score: int, policy: RiskPolicy = DEFAULT_RISK_POLICY) -> str
 
 
 def _exposure_multiplier(risk_tier: str, policy: RiskPolicy = DEFAULT_RISK_POLICY) -> float:
-    """Advisory exposure budget implied by the risk tier; never executes trades."""
     return policy.exposure_multiplier(risk_tier)
 
 
-def _risk_rationale(risk_score: int, risk_tier: str, risk_flags: list[str]) -> str:
-    if not risk_flags:
-        return f"Risk score {risk_score}/100: no material risk flags; {risk_tier} risk budget applies."
-    labels = ", ".join(risk_flags)
-    return f"Risk score {risk_score}/100: {labels}; {risk_tier} risk budget applies."
+def _risk_rationale(risk_score: int, risk_tier: str, flags: list[str]) -> str:
+    if flags:
+        return f"Risk score {risk_score}/100, tier {risk_tier}; flags: {', '.join(flags)}."
+    return f"Risk score {risk_score}/100, tier {risk_tier}; no material risk flags detected."
 
 
-def _exposure_rationale(risk_tier: str, exposure_multiplier: float) -> str:
-    if exposure_multiplier <= 0.0:
-        return "Advisory exposure budget is 0% because the risk tier is CRITICAL."
+def _exposure_rationale(exposure_multiplier: float, risk_tier: str) -> str:
+    percentage = exposure_multiplier * 100
     return (
-        f"Advisory exposure budget is {exposure_multiplier:.0%} for {risk_tier} risk; "
-        "this is a sizing constraint only and never executes a trade."
+        f"Advisory exposure budget is {percentage:.0f}% at {risk_tier} risk; "
+        "sizing-only guidance, never trade execution."
     )
 
 
 def build_decision(report: dict[str, Any], policy: RiskPolicy = DEFAULT_RISK_POLICY) -> dict[str, Any]:
     score = report.get("score")
-    coverage = float(report.get("coverage", 0.0) or 0.0)
-    regime = str(report.get("regime", "")).upper()
+    coverage = float(report.get("coverage") or 0.0)
+    regime = report.get("regime")
 
     risk_score, risk_flags = _risk_assessment(report, policy)
     risk_tier = _risk_tier(risk_score, policy)
-    risk_multiplier = round(1.0 - risk_score / 100.0, 3)
     exposure_multiplier = _exposure_multiplier(risk_tier, policy)
 
-    base = {
+    if score is None or coverage < policy.minimum_coverage:
+        action = "NO_TRADE"
+    elif "high_news_risk" in risk_flags or "liquidity_unavailable" in risk_flags or risk_score >= policy.critical_score:
+        action = "NO_TRADE"
+    elif regime == "RISK_ON" and float(score) >= policy.buy_threshold:
+        action = "BUY_BIAS"
+    elif regime == "RISK_OFF" and float(score) <= policy.sell_threshold:
+        action = "SELL_BIAS"
+    else:
+        action = "HOLD"
+
+    conviction = 0.0 if score is None else min(1.0, abs(float(score) - 50.0) / 50.0)
+    risk_multiplier = max(0.0, 1.0 - risk_score / 100.0)
+    conviction *= risk_multiplier
+
+    capital = report.get("capital")
+    exposure_budget = None
+    if capital is not None:
+        exposure_budget = calculate_exposure_budget(capital, exposure_multiplier)
+
+    result = {
+        "action": action,
+        "conviction": conviction,
         "risk_score": risk_score,
+        "risk_flags": risk_flags,
         "risk_tier": risk_tier,
         "risk_multiplier": risk_multiplier,
         "exposure_multiplier": exposure_multiplier,
-        "risk_flags": risk_flags,
         "risk_rationale": _risk_rationale(risk_score, risk_tier, risk_flags),
-        "exposure_rationale": _exposure_rationale(risk_tier, exposure_multiplier),
+        "exposure_rationale": _exposure_rationale(exposure_multiplier, risk_tier),
     }
-
-    if score is None or coverage < policy.minimum_coverage:
-        return {"action": "NO_TRADE", "conviction": 0.0, **base}
-
-    if risk_tier == "CRITICAL" or "liquidity_unavailable" in risk_flags:
-        return {"action": "NO_TRADE", "conviction": 0.0, **base}
-
-    if regime == "RISK_ON" and float(score) >= policy.buy_threshold:
-        conviction = min(1.0, (float(score) - policy.buy_threshold) / (100.0 - policy.buy_threshold))
-        conviction = round(conviction * risk_multiplier, 3)
-        return {"action": "BUY_BIAS", "conviction": conviction, **base}
-
-    if regime == "RISK_OFF" and float(score) <= policy.sell_threshold:
-        conviction = min(1.0, (policy.sell_threshold - float(score)) / policy.sell_threshold)
-        conviction = round(conviction * risk_multiplier, 3)
-        return {"action": "SELL_BIAS", "conviction": conviction, **base}
-
-    conviction = round(0.5 * risk_multiplier, 3)
-    return {"action": "HOLD", "conviction": conviction, **base}
+    if exposure_budget is not None:
+        result["exposure_budget"] = exposure_budget
+        result["sizing_rationale"] = (
+            f"Capital-based advisory budget: {exposure_budget:.2f} from capital {float(capital):.2f} "
+            f"at {exposure_multiplier:.0%} exposure; no trade is executed."
+        )
+    return result
