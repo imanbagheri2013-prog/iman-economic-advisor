@@ -39,7 +39,7 @@ def test_build_equity_valuation_creates_bear_base_bull_scenarios():
     assert valuation.base_value == 130
     assert valuation.bear_value == 104
     assert valuation.bull_value == 162.5
-    assert valuation.scenarios[1].upside_pct == 30
+    assert valuation.scenarios[1].upside_pct == pytest.approx(30.0)
     assert valuation.scenarios[1].confidence == 0.8
     assert valuation.methods_used == ("DCF", "P_E")
 
@@ -49,7 +49,7 @@ def test_valuation_summary_is_report_ready():
     report = valuation_summary(valuation)
     assert report["symbol"] == "ABC"
     assert report["intrinsic_value"] == 120
-    assert report["upside_to_intrinsic_pct"] == 20
+    assert report["upside_to_intrinsic_pct"] == pytest.approx(20.0)
     assert [item["name"] for item in report["scenarios"]] == ["BEAR", "BASE", "BULL"]
 
 
