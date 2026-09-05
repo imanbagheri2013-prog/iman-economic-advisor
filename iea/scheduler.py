@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import time
+from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -13,16 +14,66 @@ from .eight_factor import analyze_eight_factor
 from .equity_fundamentals import FundamentalSnapshot
 from .equity_sources import fetch_live_equity_input
 from .health import check_all, overall_status
+from .iran_market import IranMarketAdapter
 from .pipeline import pull_and_check
 from .runtime import load_equity_payload
 
 REPORT_PATH = Path("health_report.json")
+MARKET_STATE_PATH = Path("iran_market_state.json")
 MAX_PULL_ATTEMPTS = 3
 RETRY_DELAYS_SECONDS = (2, 5)
 
 
 def _save_report(payload: dict) -> None:
     REPORT_PATH.write_text(json.dumps(payload, default=str, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _save_market_state(intelligence: dict) -> None:
+    MARKET_STATE_PATH.write_text(
+        json.dumps(intelligence, default=str, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+
+def _load_market_state() -> dict | None:
+    if not MARKET_STATE_PATH.exists():
+        return None
+    try:
+        payload = json.loads(MARKET_STATE_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _market_context(now: datetime | None = None) -> tuple[str, str]:
+    return IranMarketAdapter.session_state(now)
+
+
+def _closed_market_intelligence(market_status: str, session_date: str) -> dict:
+    previous = _load_market_state()
+    if previous is None:
+        return {
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "engine": "IEA",
+            "symbol": "IRAN_MARKET",
+            "market_region": "IRAN",
+            "market_status": market_status,
+            "session_date": session_date,
+            "data_mode": "NO_LIVE_MARKET_DATA",
+            "stale": True,
+            "score": None,
+            "coverage": 0.0,
+            "regime": "NEUTRAL",
+            "decision": {"action": "NO_TRADE", "reason": "Iran cash market is not open and no prior live snapshot is available"},
+            "factors": {},
+        }
+
+    snapshot = deepcopy(previous)
+    snapshot["market_status"] = market_status
+    snapshot["session_date"] = session_date
+    snapshot["data_mode"] = "LAST_VALID_OPEN_SNAPSHOT"
+    snapshot["stale"] = True
+    snapshot["last_valid_market_snapshot_at"] = previous.get("generated_at")
+    return snapshot
 
 
 def _capital_from_environment() -> float | None:
@@ -114,7 +165,18 @@ def run() -> int:
         health_results = check_all(store)
         health_status = overall_status(health_results)
         capital = _capital_from_environment()
-        intelligence = analyze_eight_factor(store, capital=capital)
+        market_status, session_date = _market_context()
+
+        if market_status == "OPEN":
+            intelligence = analyze_eight_factor(store, capital=capital)
+            intelligence["market_status"] = market_status
+            intelligence["session_date"] = session_date
+            intelligence["data_mode"] = "LIVE_MARKET"
+            intelligence["stale"] = False
+            _save_market_state(intelligence)
+        else:
+            intelligence = _closed_market_intelligence(market_status, session_date)
+
         equity_cycle = _build_equity_cycle(intelligence, capital)
 
         if pipeline_status != "OK":
@@ -132,6 +194,7 @@ def run() -> int:
             "health_status": health_status,
             "observations": store.count(),
             "database": str(store.path),
+            "market_session": {"status": market_status, "date": session_date},
             "freshness": freshness_results,
             "health": health_results,
             "intelligence": intelligence,
