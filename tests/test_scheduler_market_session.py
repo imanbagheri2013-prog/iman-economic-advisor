@@ -18,8 +18,9 @@ def test_scheduler_market_context_uses_tehran_session():
 def test_closed_scheduler_reuses_last_valid_state(tmp_path: Path, monkeypatch):
     state_path = tmp_path / "iran_market_state.json"
     state_path.write_text(
-        '{"generated_at":"2026-09-05T06:30:00+00:00","score":72.5,"regime":"RISK_ON",'
-        '"decision":{"action":"BUY_BIAS"},"market_status":"OPEN","stale":false}',
+        '{"generated_at":"2026-09-05T06:30:00+00:00","market_region":"IRAN",'
+        '"data_mode":"LIVE_MARKET","stale":false,"factors":{"trend":{"status":"OK"}},'
+        '"score":72.5,"regime":"RISK_ON","decision":{"action":"BUY_BIAS"},"market_status":"OPEN"}',
         encoding="utf-8",
     )
     monkeypatch.setattr(scheduler, "MARKET_STATE_PATH", state_path)
@@ -33,6 +34,22 @@ def test_closed_scheduler_reuses_last_valid_state(tmp_path: Path, monkeypatch):
     assert result["data_mode"] == "LAST_VALID_OPEN_SNAPSHOT"
     assert result["stale"] is True
     assert result["last_valid_market_snapshot_at"] == "2026-09-05T06:30:00+00:00"
+
+
+def test_closed_scheduler_rejects_non_live_persisted_state(tmp_path: Path, monkeypatch):
+    state_path = tmp_path / "iran_market_state.json"
+    state_path.write_text(
+        '{"generated_at":"2026-09-05T06:30:00+00:00","market_region":"IRAN",'
+        '"data_mode":"LAST_VALID_OPEN_SNAPSHOT","stale":true,"factors":{}}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(scheduler, "MARKET_STATE_PATH", state_path)
+
+    result = scheduler._closed_market_intelligence("CLOSED", "2026-09-05")
+
+    assert result["data_mode"] == "NO_LIVE_MARKET_DATA"
+    assert result["decision"]["action"] == "NO_TRADE"
+    assert result["score"] is None
 
 
 def test_closed_scheduler_has_safe_no_state_fallback(tmp_path: Path, monkeypatch):
