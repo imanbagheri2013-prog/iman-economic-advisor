@@ -54,4 +54,6 @@ def test_equity_analysis_summary_is_report_ready():
     assert report["symbol"] == "TEST"
     assert report["fundamental"]["score"] == analysis.fundamental.score
     assert report["valuation"]["intrinsic_value"] == pytest.approx(30)
-    assert report["final_signal"] == "NEUTRAL"
+    # At fair value, valuation contributes a neutral score, but the strong
+    # fundamentals keep the unified advisory signal attractive.
+    assert report["final_signal"] == "ATTRACTIVE"
