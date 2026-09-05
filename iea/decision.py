@@ -3,7 +3,12 @@ from __future__ import annotations
 from typing import Any
 
 from .risk import DEFAULT_RISK_POLICY, RiskPolicy
-from .sizing import calculate_exposure_budget, calculate_position_size, calculate_trade_levels
+from .sizing import (
+    DEFAULT_SIZING_POLICY,
+    calculate_exposure_budget,
+    calculate_position_size,
+    calculate_trade_levels,
+)
 
 
 def _risk_assessment(report: dict[str, Any], policy: RiskPolicy = DEFAULT_RISK_POLICY) -> tuple[int, list[str]]:
@@ -147,7 +152,7 @@ def build_decision(report: dict[str, Any], policy: RiskPolicy = DEFAULT_RISK_POL
     if position_size is not None:
         result["position_size"] = position_size
         result["position_sizing_rationale"] = (
-            f"Position notional capped by {policy.max_risk_per_trade:.2%} capital risk "
+            f"Position notional capped by {DEFAULT_SIZING_POLICY.max_risk_per_trade:.2%} capital risk "
             "and stop-loss distance; advisory sizing only, no trade is executed."
         )
     if trade_levels is not None:
