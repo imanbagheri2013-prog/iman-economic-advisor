@@ -49,7 +49,8 @@ def _load_market_state() -> dict | None:
         return None
     if payload.get("stale") is True:
         return None
-    if not payload.get("generated_at") or not isinstance(payload.get("factors"), dict):
+    factors = payload.get("factors")
+    if not payload.get("generated_at") or not isinstance(factors, list):
         return None
     return payload
 
