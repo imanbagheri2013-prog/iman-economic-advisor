@@ -74,8 +74,32 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
-      - name: Upload latest valid Iran market state
+      - name: Validate market state before artifact upload
+        id: validate-market-state
         if: success() && hashFiles('iran_market_state.json') != ''
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path("iran_market_state.json")
+          data = json.loads(p.read_text(encoding="utf-8"))
+          valid = (
+              isinstance(data, dict)
+              and data.get("market_region") == "IRAN"
+              and data.get("data_mode") == "LIVE_MARKET"
+              and data.get("stale") is False
+              and isinstance(data.get("factors"), list)
+              and bool(data.get("generated_at"))
+          )
+          if valid:
+              print("Valid LIVE_MARKET state; artifact upload is allowed.")
+          else:
+              print("Current state is not a valid live snapshot; it will not replace the last valid artifact.")
+              raise SystemExit(1)
+          PY
+
+      - name: Upload latest valid Iran market state
+        if: success() && steps.validate-market-state.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: iran-market-state
