@@ -77,9 +77,12 @@ jobs:
       - name: Validate market state before artifact upload
         id: validate-market-state
         if: success() && hashFiles('iran_market_state.json') != ''
+        env:
+          GITHUB_OUTPUT: ${{ github.output }}
         run: |
           python - <<'PY'
           import json
+          import os
           from pathlib import Path
           p = Path("iran_market_state.json")
           data = json.loads(p.read_text(encoding="utf-8"))
@@ -91,7 +94,7 @@ jobs:
               and isinstance(data.get("factors"), list)
               and bool(data.get("generated_at"))
           )
-          with open("$GITHUB_OUTPUT", "a", encoding="utf-8") as output:
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
               output.write(f"valid={'true' if valid else 'false'}\n")
           print("Valid LIVE_MARKET state; artifact upload is allowed." if valid else "Current state is not a valid live snapshot; preserving the previous valid artifact.")
           PY
