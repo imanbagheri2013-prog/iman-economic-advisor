@@ -78,7 +78,10 @@ def test_eight_factor_market_adapters_fill_six_factors(tmp_path):
     try:
         report = analyze_eight_factor(store, market, FakeSentiment())
         assert report["symbol"] == "BTCUSDT"
-        assert report["coverage"] == 0.75
+        # Six market/sentiment factors are OK and the macro fundamental factor
+        # is also available from the current intelligence engine, while news
+        # remains unavailable without a live news snapshot in this test.
+        assert report["coverage"] == 0.875
         assert report["score"] is not None
         assert report["regime"] in {"RISK_ON", "NEUTRAL", "RISK_OFF"}
         assert market.snapshot_calls == 1
@@ -100,7 +103,7 @@ def test_eight_factor_market_adapters_fill_six_factors(tmp_path):
         assert by_name["sentiment"]["details"]["value"] == 62.0
         assert by_name["sentiment"]["details"]["classification"] == "Greed"
         assert by_name["sentiment"]["details"]["change_1d"] == -7.0
-        assert by_name["fundamental"]["status"] == "UNAVAILABLE"
+        assert by_name["fundamental"]["status"] == "OK"
         assert by_name["news_risk"]["status"] == "UNAVAILABLE"
     finally:
         store.close()
