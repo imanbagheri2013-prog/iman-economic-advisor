@@ -35,6 +35,9 @@ jobs:
           IEA_DB_PATH: "data/iea.sqlite3"
           IEA_CAPITAL: ${{ vars.IEA_CAPITAL }}
           IEA_EQUITY_INPUT_PATH: "config/equity_input.json"
+          IEA_EQUITY_SYMBOL: ${{ vars.IEA_EQUITY_SYMBOL }}
+          IEA_EQUITY_PE_MULTIPLE: ${{ vars.IEA_EQUITY_PE_MULTIPLE }}
+          IEA_SEC_USER_AGENT: ${{ vars.IEA_SEC_USER_AGENT }}
         run: python -m iea.scheduler
 
       - name: Upload scheduler report
