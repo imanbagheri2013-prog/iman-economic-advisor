@@ -46,12 +46,14 @@ def _sec_cik(symbol: str, timeout: float) -> int:
 
 
 def _annual_values(facts: dict[str, Any], concepts: tuple[str, ...]) -> list[float]:
-    units = facts.get("units", {})
     rows: list[dict[str, Any]] = []
     for concept in concepts:
-        for unit_rows in units.get(concept, {}).values():
+        for unit_rows in facts.get(concept, {}).values():
             rows.extend(row for row in unit_rows if isinstance(row, dict))
-    annual = [row for row in rows if row.get("form") in {"10-K", "10-K/A"} and row.get("val") is not None]
+    annual = [
+        row for row in rows
+        if row.get("form") in {"10-K", "10-K/A"} and row.get("val") is not None
+    ]
     annual.sort(key=lambda row: (str(row.get("end", "")), str(row.get("filed", ""))))
     dedup: dict[str, dict[str, Any]] = {}
     for row in annual:
