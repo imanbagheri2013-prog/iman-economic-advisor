@@ -1,4 +1,5 @@
 from iea.decision import build_decision
+from iea.risk import RiskPolicy
 
 
 def _safe_factors():
@@ -152,3 +153,17 @@ def test_oi_trend_divergence_adds_risk_and_sets_moderate_budget():
     assert result["exposure_multiplier"] == 0.75
     assert "oi_trend_divergence" in result["risk_flags"]
     assert "oi_trend_divergence" in result["risk_rationale"]
+
+
+def test_custom_policy_changes_decision_thresholds_without_changing_default():
+    report = {
+        "score": 68,
+        "coverage": 0.8,
+        "regime": "RISK_ON",
+        "factors": _safe_factors(),
+    }
+    default_result = build_decision(report)
+    tuned_result = build_decision(report, RiskPolicy(buy_threshold=70.0))
+    assert default_result["action"] == "BUY_BIAS"
+    assert tuned_result["action"] == "HOLD"
+    assert default_result["risk_tier"] == tuned_result["risk_tier"] == "LOW"
