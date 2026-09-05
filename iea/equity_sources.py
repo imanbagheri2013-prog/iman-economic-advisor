@@ -45,16 +45,34 @@ def _sec_cik(symbol: str, timeout: float) -> int:
     raise ValueError(f"SEC ticker not found: {symbol}")
 
 
-def _annual_values(facts: dict[str, Any], concepts: tuple[str, ...]) -> list[float]:
-    """Return annual SEC values, newest first, from the us-gaap facts map."""
-    rows: list[dict[str, Any]] = []
-    for concept in concepts:
-        concept_data = facts.get(concept, {})
-        for unit_rows in concept_data.values():
-            if isinstance(unit_rows, dict) and isinstance(unit_rows.get("units"), list):
-                unit_rows = unit_rows["units"]
+def _concept_rows(facts: dict[str, Any], concept: str) -> list[dict[str, Any]]:
+    """Extract rows from both real SEC XBRL and compact test fixtures."""
+    concept_data = facts.get(concept, {})
+    if not isinstance(concept_data, dict):
+        return []
+
+    units = concept_data.get("units")
+    if isinstance(units, dict):
+        rows: list[dict[str, Any]] = []
+        for unit_rows in units.values():
             if isinstance(unit_rows, list):
                 rows.extend(row for row in unit_rows if isinstance(row, dict))
+        return rows
+
+    rows = []
+    for unit_rows in concept_data.values():
+        if isinstance(unit_rows, dict) and isinstance(unit_rows.get("units"), list):
+            unit_rows = unit_rows["units"]
+        if isinstance(unit_rows, list):
+            rows.extend(row for row in unit_rows if isinstance(row, dict))
+    return rows
+
+
+def _annual_values(facts: dict[str, Any], concepts: tuple[str, ...]) -> list[float]:
+    """Return annual SEC values, newest first, from the facts concept map."""
+    rows: list[dict[str, Any]] = []
+    for concept in concepts:
+        rows.extend(_concept_rows(facts, concept))
 
     annual = [
         row for row in rows
@@ -82,6 +100,20 @@ def _latest(facts: dict[str, Any], concepts: tuple[str, ...], *, required: bool 
 def _prior(facts: dict[str, Any], concepts: tuple[str, ...]) -> float | None:
     values = _annual_values(facts, concepts)
     return values[1] if len(values) > 1 else None
+
+
+def _latest_instant(facts: dict[str, Any], concepts: tuple[str, ...], *, required: bool = True) -> float | None:
+    """Return the newest SEC instant fact, used for shares outstanding."""
+    rows: list[dict[str, Any]] = []
+    for concept in concepts:
+        rows.extend(_concept_rows(facts, concept))
+    rows = [row for row in rows if row.get("val") is not None and row.get("end")]
+    rows.sort(key=lambda row: (str(row.get("end", "")), str(row.get("filed", ""))), reverse=True)
+    if not rows:
+        if required:
+            raise ValueError(f"SEC instant fact unavailable: {concepts[0]}")
+        return None
+    return float(rows[0]["val"])
 
 
 def _stooq_price(symbol: str, timeout: float) -> float:
@@ -112,6 +144,7 @@ def fetch_live_equity_input(symbol: str, timeout: float = 15.0) -> LiveEquityInp
     cik = _sec_cik(symbol, timeout)
     company = _get_json(SEC_FACTS_URL.format(cik=cik), timeout)
     facts = company["facts"]["us-gaap"]
+    dei_facts = company["facts"].get("dei", {})
 
     revenue = _latest(facts, ("RevenueFromContractWithCustomerExcludingAssessedTax", "SalesRevenueNet"))
     gross_profit = _latest(facts, ("GrossProfit",))
@@ -123,7 +156,9 @@ def fetch_live_equity_input(symbol: str, timeout: float = 15.0) -> LiveEquityInp
     debt_noncurrent = _latest(facts, ("LongTermDebtNoncurrent",), required=False) or 0.0
     cash = _latest(facts, ("CashAndCashEquivalentsAtCarryingValue", "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents"))
     equity = _latest(facts, ("StockholdersEquity", "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest"))
-    shares = _latest(facts, ("EntityCommonStockSharesOutstanding",), required=False)
+    shares = _latest_instant(dei_facts, ("EntityCommonStockSharesOutstanding",), required=False)
+    if shares is None:
+        shares = _latest_instant(facts, ("EntityCommonStockSharesOutstanding",), required=False)
     if shares is None or shares <= 0:
         raise ValueError(f"SEC shares outstanding unavailable: {symbol}")
 
