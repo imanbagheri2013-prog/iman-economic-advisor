@@ -73,7 +73,7 @@ def test_eight_factor_market_adapters_fill_six_factors(tmp_path):
     try:
         report = analyze_eight_factor(store, market, FakeSentiment())
         assert report["symbol"] == "BTCUSDT"
-        assert report["coverage"] == 0.875
+        assert report["coverage"] == 0.75
         assert report["score"] is not None
         assert report["regime"] in {"RISK_ON", "NEUTRAL", "RISK_OFF"}
         assert market.snapshot_calls == 1
