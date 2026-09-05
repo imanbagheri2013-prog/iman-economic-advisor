@@ -91,15 +91,13 @@ jobs:
               and isinstance(data.get("factors"), list)
               and bool(data.get("generated_at"))
           )
-          if valid:
-              print("Valid LIVE_MARKET state; artifact upload is allowed.")
-          else:
-              print("Current state is not a valid live snapshot; it will not replace the last valid artifact.")
-              raise SystemExit(1)
+          with open("$GITHUB_OUTPUT", "a", encoding="utf-8") as output:
+              output.write(f"valid={'true' if valid else 'false'}\n")
+          print("Valid LIVE_MARKET state; artifact upload is allowed." if valid else "Current state is not a valid live snapshot; preserving the previous valid artifact.")
           PY
 
       - name: Upload latest valid Iran market state
-        if: success() && steps.validate-market-state.outcome == 'success'
+        if: success() && steps.validate-market-state.outputs.valid == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: iran-market-state
