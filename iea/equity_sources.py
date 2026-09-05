@@ -46,19 +46,28 @@ def _sec_cik(symbol: str, timeout: float) -> int:
 
 
 def _annual_values(facts: dict[str, Any], concepts: tuple[str, ...]) -> list[float]:
+    """Return annual SEC values, newest first, from the us-gaap facts map."""
     rows: list[dict[str, Any]] = []
     for concept in concepts:
-        for unit_rows in facts.get(concept, {}).values():
-            rows.extend(row for row in unit_rows if isinstance(row, dict))
+        concept_data = facts.get(concept, {})
+        for unit_rows in concept_data.values():
+            if isinstance(unit_rows, dict) and isinstance(unit_rows.get("units"), list):
+                unit_rows = unit_rows["units"]
+            if isinstance(unit_rows, list):
+                rows.extend(row for row in unit_rows if isinstance(row, dict))
+
     annual = [
         row for row in rows
         if row.get("form") in {"10-K", "10-K/A"} and row.get("val") is not None
     ]
-    annual.sort(key=lambda row: (str(row.get("end", "")), str(row.get("filed", ""))))
+    annual.sort(key=lambda row: (str(row.get("end", "")), str(row.get("filed", ""))), reverse=True)
+
     dedup: dict[str, dict[str, Any]] = {}
     for row in annual:
-        dedup[str(row.get("end"))] = row
-    return [float(dedup[key]["val"]) for key in sorted(dedup, reverse=True)]
+        end = str(row.get("end", ""))
+        if end and end not in dedup:
+            dedup[end] = row
+    return [float(dedup[key]["val"]) for key in dedup]
 
 
 def _latest(facts: dict[str, Any], concepts: tuple[str, ...], *, required: bool = True) -> float | None:
