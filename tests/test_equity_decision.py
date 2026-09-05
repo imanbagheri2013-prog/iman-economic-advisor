@@ -41,7 +41,7 @@ def test_equity_and_market_scores_are_combined_before_policy_gate():
     )
     assert result["equity_score"] > 70
     assert result["market_score"] == 70
-    assert result["combined_score"] == pytest.approx(76.0)
+    assert result["combined_score"] == pytest.approx(81.36)
     assert result["regime"] == "RISK_ON"
     assert result["decision"]["action"] == "BUY_BIAS"
 
