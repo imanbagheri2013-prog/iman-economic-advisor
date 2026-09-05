@@ -130,3 +130,37 @@ def test_critical_risk_produces_zero_exposure_budget():
 def test_missing_capital_keeps_decision_backward_compatible():
     result = build_decision({"score": 80, "coverage": 1.0, "regime": "RISK_ON", "factors": _safe_factors()})
     assert "exposure_budget" not in result
+
+
+def test_stop_loss_position_size_is_risk_capped():
+    report = {
+        "score": 80,
+        "coverage": 1.0,
+        "regime": "RISK_ON",
+        "capital": 100000000,
+        "entry_price": 100000,
+        "stop_loss": 95000,
+        "factors": _safe_factors(),
+    }
+    result = build_decision(report)
+    assert result["exposure_budget"] == 100000000.0
+    assert result["position_size"] == 30000000.0
+    assert "stop-loss distance" in result["position_sizing_rationale"]
+
+
+def test_critical_risk_zeroes_stop_loss_position_size():
+    report = {
+        "score": 80,
+        "coverage": 1.0,
+        "regime": "RISK_ON",
+        "capital": 100000000,
+        "entry_price": 100000,
+        "stop_loss": 95000,
+        "factors": [
+            {"name": "news_risk", "details": {"risk_regime": "HIGH_RISK"}},
+            {"name": "liquidity", "details": {"depth_imbalance": 0.0}},
+        ],
+    }
+    result = build_decision(report)
+    assert result["action"] == "NO_TRADE"
+    assert result["position_size"] == 0.0
