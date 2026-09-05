@@ -79,11 +79,18 @@ def _closed_market_intelligence(market_status: str, session_date: str) -> dict:
         }
 
     snapshot = deepcopy(previous)
+    previous_decision = snapshot.get("decision")
     snapshot["market_status"] = market_status
     snapshot["session_date"] = session_date
     snapshot["data_mode"] = "LAST_VALID_OPEN_SNAPSHOT"
     snapshot["stale"] = True
     snapshot["last_valid_market_snapshot_at"] = previous.get("generated_at")
+    if previous_decision is not None:
+        snapshot["last_valid_decision"] = previous_decision
+    snapshot["decision"] = {
+        "action": "NO_TRADE",
+        "reason": "Iran cash market is not open; the previous live snapshot is stale and is not actionable",
+    }
     return snapshot
 
 
