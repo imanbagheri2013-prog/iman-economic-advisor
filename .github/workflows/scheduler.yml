@@ -77,8 +77,6 @@ jobs:
       - name: Validate market state before artifact upload
         id: validate-market-state
         if: success() && hashFiles('iran_market_state.json') != ''
-        env:
-          GITHUB_OUTPUT: ${{ github.output }}
         run: |
           python - <<'PY'
           import json
