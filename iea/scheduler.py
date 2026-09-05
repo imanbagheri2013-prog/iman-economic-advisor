@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -24,6 +25,19 @@ def _save_report(payload: dict) -> None:
     )
 
 
+def _capital_from_environment() -> float | None:
+    raw = os.getenv("IEA_CAPITAL")
+    if raw is None or not raw.strip():
+        return None
+    try:
+        capital = float(raw)
+    except ValueError as exc:
+        raise ValueError("IEA_CAPITAL must be a numeric value") from exc
+    if capital < 0:
+        raise ValueError("IEA_CAPITAL must be non-negative")
+    return capital
+
+
 def _pull_with_retry():
     last_error: requests.HTTPError | None = None
     for attempt in range(1, MAX_PULL_ATTEMPTS + 1):
@@ -45,7 +59,7 @@ def run() -> int:
         store, freshness_results, pipeline_status = _pull_with_retry()
         health_results = check_all(store)
         health_status = overall_status(health_results)
-        intelligence = analyze_eight_factor(store)
+        intelligence = analyze_eight_factor(store, capital=_capital_from_environment())
 
         if pipeline_status != "OK":
             status = "error"
