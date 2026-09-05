@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Iterable
 
-from .equity_analysis import FundamentalSnapshot, analyze_equity
+from .equity_analysis import FundamentalSnapshot, analyze_equity, equity_analysis_summary
 from .equity_decision import build_equity_market_decision
 
 
@@ -46,13 +46,7 @@ def build_equity_advisor_report(
     return {
         "engine": "iea_equity_advisor_v1",
         "symbol": analysis.symbol,
-        "analysis": {
-            "fundamental": analysis.fundamental.to_dict(),
-            "valuation": analysis.valuation.to_dict(),
-            "final_score": analysis.final_score,
-            "final_signal": analysis.final_signal,
-            "reasons": list(analysis.reasons),
-        },
+        "analysis": equity_analysis_summary(analysis),
         "market": {
             "score": unified["market_score"],
             "coverage": unified["coverage"],
