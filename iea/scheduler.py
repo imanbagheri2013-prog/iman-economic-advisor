@@ -60,7 +60,7 @@ def _build_equity_cycle(intelligence: dict, capital: float | None) -> dict | Non
         current_price=float(payload["current_price"]),
         method_values=payload["method_values"],
         method_weights=payload["method_weights"],
-        market_report=intelligence["summary"],
+        market_report=intelligence,
         confidence=float(payload.get("confidence", 0.7)),
         downside=float(payload.get("downside", 0.20)),
         upside=float(payload.get("upside", 0.25)),
