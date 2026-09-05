@@ -37,6 +37,6 @@ def test_ingest_price_payloads_persists_records(tmp_path):
 
 
 def test_optional_metrics_are_skipped():
-    batch = build_price_batch([payload(last=None, value=None, trade_count=None)])
+    batch = build_price_batch([payload(pDrCotVal=None, qTotCap=None, zTotTran=None)])
     assert batch.records_written == 6
     assert all(not record.series_id.endswith(".last") for record in batch.records)
