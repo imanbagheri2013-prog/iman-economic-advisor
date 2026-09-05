@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from iea.risk import DEFAULT_RISK_POLICY, RiskPolicy
+
 
 BUY_THRESHOLD = 62.5
 SELL_THRESHOLD = 37.5
@@ -16,34 +18,34 @@ def _factor_details(report: dict[str, Any], name: str) -> dict[str, Any]:
     return {}
 
 
-def _risk_assessment(report: dict[str, Any]) -> tuple[int, list[str]]:
+def _risk_assessment(report: dict[str, Any], policy: RiskPolicy = DEFAULT_RISK_POLICY) -> tuple[int, list[str]]:
     score = 0
     flags: list[str] = []
 
     news = _factor_details(report, "news_risk")
     if not news:
-        score += 25
+        score += policy.unavailable_news_points
         flags.append("news_risk_unavailable")
     else:
         regime = str(news.get("risk_regime", "")).upper()
         if regime == "HIGH_RISK":
-            score += 60
+            score += policy.high_news_risk_points
             flags.append("high_news_risk")
         elif regime == "ELEVATED_RISK":
-            score += 20
+            score += policy.elevated_news_risk_points
             flags.append("elevated_news_risk")
 
     liquidity = _factor_details(report, "liquidity")
     if not liquidity:
-        score += 50
+        score += policy.unavailable_liquidity_points
         flags.append("liquidity_unavailable")
     else:
         try:
             imbalance = abs(float(liquidity.get("depth_imbalance", 0.0)))
         except (TypeError, ValueError):
             imbalance = 0.0
-        if imbalance >= 0.35:
-            score += 25
+        if imbalance >= policy.extreme_liquidity_imbalance:
+            score += policy.extreme_liquidity_points
             flags.append("extreme_liquidity_imbalance")
 
     funding = _factor_details(report, "funding_rate")
@@ -51,8 +53,8 @@ def _risk_assessment(report: dict[str, Any]) -> tuple[int, list[str]]:
         funding_pct = abs(float(funding.get("funding_rate_pct", 0.0)))
     except (TypeError, ValueError):
         funding_pct = 0.0
-    if funding_pct >= 0.08:
-        score += 25
+    if funding_pct >= policy.extreme_funding_rate_pct:
+        score += policy.extreme_funding_points
         flags.append("extreme_funding_crowding")
 
     oi = _factor_details(report, "open_interest")
@@ -64,31 +66,24 @@ def _risk_assessment(report: dict[str, Any]) -> tuple[int, list[str]]:
         trend_sign = float(trend.get("return_4h_pct", 0.0))
     except (TypeError, ValueError):
         oi_change = trend_change = oi_sign = trend_sign = 0.0
-    if oi_change >= 5.0 and trend_change >= 1.0 and oi_sign * trend_sign < 0:
-        score += 20
+    if (
+        oi_change >= policy.oi_divergence_threshold_pct
+        and trend_change >= policy.trend_divergence_threshold_pct
+        and oi_sign * trend_sign < 0
+    ):
+        score += policy.oi_trend_divergence_points
         flags.append("oi_trend_divergence")
 
     return min(score, 100), flags
 
 
-def _risk_tier(risk_score: int) -> str:
-    if risk_score >= 60:
-        return "CRITICAL"
-    if risk_score >= 40:
-        return "HIGH"
-    if risk_score >= 20:
-        return "MODERATE"
-    return "LOW"
+def _risk_tier(risk_score: int, policy: RiskPolicy = DEFAULT_RISK_POLICY) -> str:
+    return policy.tier(risk_score)
 
 
-def _exposure_multiplier(risk_tier: str) -> float:
+def _exposure_multiplier(risk_tier: str, policy: RiskPolicy = DEFAULT_RISK_POLICY) -> float:
     """Advisory exposure budget implied by the risk tier; never executes trades."""
-    return {
-        "LOW": 1.0,
-        "MODERATE": 0.75,
-        "HIGH": 0.5,
-        "CRITICAL": 0.0,
-    }.get(risk_tier, 0.0)
+    return policy.exposure_multiplier(risk_tier)
 
 
 def _risk_rationale(risk_score: int, risk_tier: str, risk_flags: list[str]) -> str:
@@ -107,15 +102,15 @@ def _exposure_rationale(risk_tier: str, exposure_multiplier: float) -> str:
     )
 
 
-def build_decision(report: dict[str, Any]) -> dict[str, Any]:
+def build_decision(report: dict[str, Any], policy: RiskPolicy = DEFAULT_RISK_POLICY) -> dict[str, Any]:
     score = report.get("score")
     coverage = float(report.get("coverage", 0.0) or 0.0)
     regime = str(report.get("regime", "")).upper()
 
-    risk_score, risk_flags = _risk_assessment(report)
-    risk_tier = _risk_tier(risk_score)
+    risk_score, risk_flags = _risk_assessment(report, policy)
+    risk_tier = _risk_tier(risk_score, policy)
     risk_multiplier = round(1.0 - risk_score / 100.0, 3)
-    exposure_multiplier = _exposure_multiplier(risk_tier)
+    exposure_multiplier = _exposure_multiplier(risk_tier, policy)
 
     base = {
         "risk_score": risk_score,
