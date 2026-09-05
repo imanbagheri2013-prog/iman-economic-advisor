@@ -76,6 +76,77 @@ def _confidence_weight(result: FactorResult) -> float:
         return 0.0
 
 
+def _is_not_applicable(result: FactorResult) -> bool:
+    """Identify factors that are structurally irrelevant to the selected market."""
+    details = result.details or {}
+    reason = str(details.get("reason", "")).lower()
+    return bool(details.get("not_applicable")) or reason in {
+        "not_applicable",
+        "not_applicable_to_cash_equities",
+        "not_applicable_to_market",
+    }
+
+
+def _factor_quality(result: FactorResult) -> dict[str, Any]:
+    """Return an operational quality record without changing the factor schema."""
+    not_applicable = _is_not_applicable(result)
+    usable = result.status == "OK" and result.score is not None
+    if not_applicable:
+        quality_status = "NOT_APPLICABLE"
+    elif usable:
+        quality_status = "USABLE"
+    else:
+        quality_status = "UNAVAILABLE"
+    return {
+        "name": result.name,
+        "status": result.status,
+        "quality_status": quality_status,
+        "usable": usable,
+        "not_applicable": not_applicable,
+        "confidence": round(_confidence_weight(result), 3) if usable else 0.0,
+        "provider": result.provider,
+        "timestamp": result.timestamp,
+        "reason": (result.details or {}).get("reason"),
+    }
+
+
+def data_quality_summary(results: list[FactorResult]) -> dict[str, Any]:
+    """Summarize factor usability separately from structural non-applicability."""
+    records = [_factor_quality(result) for result in results]
+    applicable = [record for record in records if not record["not_applicable"]]
+    usable = [record for record in applicable if record["usable"]]
+    not_applicable = [record for record in records if record["not_applicable"]]
+
+    applicable_count = len(applicable)
+    usable_count = len(usable)
+    if applicable_count:
+        usable_coverage = usable_count / applicable_count
+        confidence_values = [record["confidence"] for record in usable]
+        confidence_average = sum(confidence_values) / len(confidence_values) if confidence_values else 0.0
+        score = round(100 * usable_coverage * confidence_average, 1)
+    else:
+        usable_coverage = 0.0
+        score = 0.0
+
+    if usable_count == applicable_count and applicable_count:
+        status = "GOOD"
+    elif usable_count > 0:
+        status = "DEGRADED"
+    else:
+        status = "INSUFFICIENT"
+
+    return {
+        "score": score,
+        "status": status,
+        "factor_count": len(records),
+        "applicable_factor_count": applicable_count,
+        "usable_factor_count": usable_count,
+        "not_applicable_count": len(not_applicable),
+        "usable_coverage": round(usable_coverage, 3),
+        "factors": records,
+    }
+
+
 def aggregate(results: list[FactorResult], minimum_coverage: float = 0.5) -> dict[str, Any]:
     available = [r for r in results if r.score is not None and r.status == "OK"]
     unavailable = [r.name for r in results if r not in available]
@@ -84,6 +155,7 @@ def aggregate(results: list[FactorResult], minimum_coverage: float = 0.5) -> dic
         "coverage": round(coverage, 3),
         "available_factors": [r.name for r in available],
         "unavailable_factors": unavailable,
+        "data_quality": data_quality_summary(results),
     }
 
     if not available or coverage < minimum_coverage:
