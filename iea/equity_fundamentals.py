@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 
 
 @dataclass(frozen=True)
@@ -85,42 +85,63 @@ def score_fundamentals(snapshot: FundamentalSnapshot) -> FundamentalQuality:
     score = 50.0
     reasons: list[str] = []
 
-    for threshold, points, label in ((0.30, 10, "strong gross margin"), (0.15, 10, "strong operating margin"), (0.10, 10, "positive net margin")):
-        value = (metrics.gross_margin, metrics.operating_margin, metrics.net_margin)[(10 - points) // 0 + 0] if False else None
     if metrics.gross_margin >= 0.30:
-        score += 10; reasons.append("strong gross margin")
+        score += 10
+        reasons.append("strong gross margin")
     elif metrics.gross_margin < 0:
-        score -= 10; reasons.append("negative gross margin")
+        score -= 10
+        reasons.append("negative gross margin")
+
     if metrics.operating_margin >= 0.15:
-        score += 10; reasons.append("strong operating margin")
+        score += 10
+        reasons.append("strong operating margin")
     elif metrics.operating_margin < 0:
-        score -= 10; reasons.append("negative operating margin")
+        score -= 10
+        reasons.append("negative operating margin")
+
     if metrics.net_margin >= 0.10:
-        score += 10; reasons.append("healthy net margin")
+        score += 10
+        reasons.append("healthy net margin")
     elif metrics.net_margin <= 0:
-        score -= 15; reasons.append("negative net profit")
+        score -= 15
+        reasons.append("negative net profit")
+
     if metrics.roe >= 0.15:
-        score += 10; reasons.append("strong ROE")
+        score += 10
+        reasons.append("strong ROE")
     elif metrics.roe < 0:
-        score -= 10; reasons.append("negative ROE")
+        score -= 10
+        reasons.append("negative ROE")
+
     if metrics.debt_to_equity <= 0.5:
-        score += 10; reasons.append("moderate leverage")
+        score += 10
+        reasons.append("moderate leverage")
     elif metrics.debt_to_equity > 2.0:
-        score -= 15; reasons.append("high leverage")
+        score -= 15
+        reasons.append("high leverage")
+
     if metrics.free_cash_flow > 0:
-        score += 10; reasons.append("positive free cash flow")
+        score += 10
+        reasons.append("positive free cash flow")
     else:
-        score -= 10; reasons.append("negative free cash flow")
+        score -= 10
+        reasons.append("negative free cash flow")
+
     if metrics.revenue_growth is not None:
         if metrics.revenue_growth >= 0.15:
-            score += 5; reasons.append("strong revenue growth")
+            score += 5
+            reasons.append("strong revenue growth")
         elif metrics.revenue_growth < 0:
-            score -= 5; reasons.append("declining revenue")
+            score -= 5
+            reasons.append("declining revenue")
+
     if metrics.net_profit_growth is not None:
         if metrics.net_profit_growth >= 0.15:
-            score += 5; reasons.append("strong profit growth")
+            score += 5
+            reasons.append("strong profit growth")
         elif metrics.net_profit_growth < 0:
-            score -= 5; reasons.append("declining profit")
+            score -= 5
+            reasons.append("declining profit")
 
     score = round(max(0.0, min(100.0, score)), 2)
     signal = "STRONG" if score >= 70 else "WEAK" if score < 40 else "NEUTRAL"
@@ -132,6 +153,6 @@ def fundamentals_summary(quality: FundamentalQuality) -> dict[str, object]:
         "symbol": quality.symbol,
         "score": quality.score,
         "signal": quality.signal,
-        "metrics": quality.metrics.__dict__,
+        "metrics": asdict(quality.metrics),
         "reasons": list(quality.reasons),
     }
