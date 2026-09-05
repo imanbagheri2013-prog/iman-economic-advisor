@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 
@@ -38,9 +39,27 @@ def main():
 
         print(report())
 
+    elif cmd == "advisor":
+        from .pipeline import pull
+        from .runtime import build_live_equity_advisor_report, load_equity_payload
+
+        payload_path = os.getenv("IEA_EQUITY_INPUT_PATH", "config/equity_input.json")
+        payload = load_equity_payload(payload_path)
+        store = pull()
+        try:
+            capital = payload.get("capital")
+            result = build_live_equity_advisor_report(
+                store,
+                payload,
+                capital=float(capital) if capital is not None else None,
+            )
+            print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        finally:
+            store.close()
+
     else:
         raise SystemExit(
-            "Usage: python -m iea.cli [health|pull|report]"
+            "Usage: python -m iea.cli [health|pull|report|advisor]"
         )
 
 
