@@ -17,10 +17,13 @@ class SizingPolicy:
         return min(self.maximum_exposure, max(self.minimum_exposure, exposure))
 
 
+DEFAULT_SIZING_POLICY = SizingPolicy()
+
+
 def calculate_exposure_budget(
     capital: float,
     exposure_multiplier: float,
-    policy: SizingPolicy = SizingPolicy(),
+    policy: SizingPolicy = DEFAULT_SIZING_POLICY,
 ) -> float:
     """Return the advisory capital budget implied by an exposure multiplier."""
     capital_amount = max(0.0, float(capital))
@@ -33,7 +36,7 @@ def calculate_position_size(
     exposure_multiplier: float,
     entry_price: float,
     stop_loss: float,
-    policy: SizingPolicy = SizingPolicy(),
+    policy: SizingPolicy = DEFAULT_SIZING_POLICY,
 ) -> float:
     """Return position notional constrained by exposure and stop-loss risk.
 
@@ -47,9 +50,6 @@ def calculate_position_size(
     if entry == stop:
         raise ValueError("entry_price and stop_loss must differ")
     risk_fraction = abs(entry - stop) / entry
-    if risk_fraction <= 0:
-        return 0.0
-
     capital_amount = max(0.0, float(capital))
     risk_budget = capital_amount * max(0.0, float(policy.max_risk_per_trade))
     risk_limited_notional = risk_budget / risk_fraction
