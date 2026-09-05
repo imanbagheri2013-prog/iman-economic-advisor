@@ -1,6 +1,14 @@
 import pytest
 
-from iea.sizing import DEFAULT_SIZING_POLICY, SizingPolicy, calculate_exposure_budget, calculate_position_size, calculate_take_profit, calculate_trade_levels
+from iea.sizing import (
+    DEFAULT_SIZING_POLICY,
+    SizingPolicy,
+    calculate_dynamic_stop_loss,
+    calculate_exposure_budget,
+    calculate_position_size,
+    calculate_take_profit,
+    calculate_trade_levels,
+)
 
 
 def test_exposure_budget_scales_capital_by_advisory_multiplier():
@@ -52,6 +60,21 @@ def test_position_size_rejects_invalid_prices():
         calculate_position_size(100_000, 1.0, 0, 95)
     with pytest.raises(ValueError):
         calculate_position_size(100_000, 1.0, 100, 100)
+
+
+def test_dynamic_stop_loss_for_buy_uses_atr():
+    assert calculate_dynamic_stop_loss(100, "BUY", 4, 1.5) == 94.0
+
+
+def test_dynamic_stop_loss_for_sell_uses_atr():
+    assert calculate_dynamic_stop_loss(100, "SELL", 4, 1.5) == 106.0
+
+
+def test_dynamic_stop_loss_rejects_invalid_inputs():
+    with pytest.raises(ValueError):
+        calculate_dynamic_stop_loss(100, "BUY", 0)
+    with pytest.raises(ValueError):
+        calculate_dynamic_stop_loss(100, "HOLD", 4)
 
 
 def test_take_profit_for_buy_uses_two_to_one_risk_reward():
