@@ -5,11 +5,6 @@ from typing import Any
 from iea.risk import DEFAULT_RISK_POLICY, RiskPolicy
 
 
-BUY_THRESHOLD = 62.5
-SELL_THRESHOLD = 37.5
-MIN_COVERAGE = 0.625
-
-
 def _factor_details(report: dict[str, Any], name: str) -> dict[str, Any]:
     for factor in report.get("factors", []):
         if str(factor.get("name", "")).lower() == name.lower():
@@ -122,19 +117,19 @@ def build_decision(report: dict[str, Any], policy: RiskPolicy = DEFAULT_RISK_POL
         "exposure_rationale": _exposure_rationale(risk_tier, exposure_multiplier),
     }
 
-    if score is None or coverage < MIN_COVERAGE:
+    if score is None or coverage < policy.minimum_coverage:
         return {"action": "NO_TRADE", "conviction": 0.0, **base}
 
     if risk_tier == "CRITICAL" or "liquidity_unavailable" in risk_flags:
         return {"action": "NO_TRADE", "conviction": 0.0, **base}
 
-    if regime == "RISK_ON" and float(score) >= BUY_THRESHOLD:
-        conviction = min(1.0, (float(score) - BUY_THRESHOLD) / (100.0 - BUY_THRESHOLD))
+    if regime == "RISK_ON" and float(score) >= policy.buy_threshold:
+        conviction = min(1.0, (float(score) - policy.buy_threshold) / (100.0 - policy.buy_threshold))
         conviction = round(conviction * risk_multiplier, 3)
         return {"action": "BUY_BIAS", "conviction": conviction, **base}
 
-    if regime == "RISK_OFF" and float(score) <= SELL_THRESHOLD:
-        conviction = min(1.0, (SELL_THRESHOLD - float(score)) / SELL_THRESHOLD)
+    if regime == "RISK_OFF" and float(score) <= policy.sell_threshold:
+        conviction = min(1.0, (policy.sell_threshold - float(score)) / policy.sell_threshold)
         conviction = round(conviction * risk_multiplier, 3)
         return {"action": "SELL_BIAS", "conviction": conviction, **base}
 
