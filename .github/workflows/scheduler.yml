@@ -39,9 +39,9 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           set -e
-          latest_run="$(gh run list --workflow "IEA Scheduler" --branch main --status success --limit 20 --json databaseId --jq '.[0].databaseId // empty')"
+          latest_run="$(gh api --method GET "repos/${GH_REPO}/actions/artifacts" -f name=iran-market-state -f per_page=1 --jq '.artifacts[0].workflow_run.id // empty')"
           if [ -n "$latest_run" ] && gh run download "$latest_run" --name iran-market-state --dir .; then
-            echo "Restored market state from scheduler run $latest_run"
+            echo "Restored newest Iran market state artifact from scheduler run $latest_run"
           else
             echo "No previous market state artifact available; scheduler will use a no-state fallback."
           fi
