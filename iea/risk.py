@@ -25,6 +25,9 @@ class RiskPolicy:
     moderate_exposure: float = 0.75
     high_exposure: float = 0.5
     critical_exposure: float = 0.0
+    buy_threshold: float = 62.5
+    sell_threshold: float = 37.5
+    minimum_coverage: float = 0.625
 
     def tier(self, risk_score: int) -> str:
         if risk_score >= self.critical_score:
