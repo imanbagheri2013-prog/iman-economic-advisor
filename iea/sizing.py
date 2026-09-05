@@ -11,6 +11,7 @@ class SizingPolicy:
     maximum_exposure: float = 1.0
     max_risk_per_trade: float = 0.015
     rounding_digits: int = 2
+    default_atr_multiplier: float = 1.5
 
     def clamp_exposure(self, exposure_multiplier: float) -> float:
         exposure = float(exposure_multiplier)
@@ -57,6 +58,33 @@ def calculate_position_size(
     return round(min(exposure_budget, risk_limited_notional), policy.rounding_digits)
 
 
+def calculate_dynamic_stop_loss(
+    entry_price: float,
+    side: str,
+    atr: float,
+    atr_multiplier: float = DEFAULT_SIZING_POLICY.default_atr_multiplier,
+    rounding_digits: int = DEFAULT_SIZING_POLICY.rounding_digits,
+) -> float:
+    """Return an advisory volatility-adjusted stop-loss using ATR."""
+    entry = float(entry_price)
+    volatility = float(atr)
+    multiplier = float(atr_multiplier)
+    normalized_side = str(side).upper()
+    if entry <= 0:
+        raise ValueError("entry_price must be positive")
+    if volatility <= 0:
+        raise ValueError("atr must be positive")
+    if multiplier <= 0:
+        raise ValueError("atr_multiplier must be positive")
+    if normalized_side not in {"BUY", "SELL"}:
+        raise ValueError("side must be BUY or SELL")
+    distance = volatility * multiplier
+    stop = entry - distance if normalized_side == "BUY" else entry + distance
+    if stop <= 0:
+        raise ValueError("calculated stop_loss must be positive")
+    return round(stop, rounding_digits)
+
+
 def calculate_take_profit(
     entry_price: float,
     stop_loss: float,
@@ -82,6 +110,8 @@ def calculate_take_profit(
         target = entry + risk_distance * ratio
     else:
         target = entry - risk_distance * ratio
+    if target <= 0:
+        raise ValueError("calculated take_profit must be positive")
     return round(target, rounding_digits)
 
 
