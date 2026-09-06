@@ -54,8 +54,9 @@ def _load_fresh_report(report_path: str) -> dict[str, Any]:
     return report
 
 
-def create_app(report_path: str = "health_report.json") -> Any:
+def create_app(report_path: str | None = None) -> Any:
     """Create the HTTP API backed by the scheduler's latest trusted report."""
+    resolved_report_path = report_path or os.getenv("IEA_REPORT_PATH", "health_report.json")
     try:
         from fastapi import FastAPI, HTTPException
     except ImportError as exc:  # pragma: no cover
@@ -70,7 +71,7 @@ def create_app(report_path: str = "health_report.json") -> Any:
     @app.get("/ready")
     def ready() -> dict[str, Any]:
         try:
-            report = load_report(report_path)
+            report = load_report(resolved_report_path)
         except (RuntimeError, ValueError) as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         meta = report.get("report_meta") or {}
@@ -80,15 +81,15 @@ def create_app(report_path: str = "health_report.json") -> Any:
 
     @app.get("/status")
     def status() -> dict[str, Any]:
-        return _status_payload(load_report(report_path))
+        return _status_payload(load_report(resolved_report_path))
 
     @app.get("/answer")
     def get_answer(question: str) -> dict[str, Any]:
         try:
-            _load_fresh_report(report_path)
+            _load_fresh_report(resolved_report_path)
         except (RuntimeError, ValueError) as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
-        return answer(question, report_path)
+        return answer(question, resolved_report_path)
 
     return app
 
@@ -102,7 +103,7 @@ def main() -> int:
     except ImportError as exc:  # pragma: no cover
         raise RuntimeError("Uvicorn is required for the IEA API") from exc
     host = os.getenv("IEA_API_HOST", "0.0.0.0")
-    port = int(os.getenv("IEA_API_PORT", "8000"))
+    port = int(os.getenv("PORT", os.getenv("IEA_API_PORT", "8000")))
     uvicorn.run("iea.api:app", host=host, port=port)
     return 0
 
