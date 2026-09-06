@@ -7,7 +7,7 @@ turns them into transparent, auditable signals for the advisor.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Iterable
 
 
@@ -44,6 +44,17 @@ POLICY_EVENT_TYPES = (
     "liquidity_absorption",
     "official_statement",
 )
+
+# Conservative freshness windows. The source frequency controls the window;
+# unknown frequencies deliberately use the shortest operational window.
+FRESHNESS_WINDOWS_DAYS = {
+    "daily": 3,
+    "weekly": 10,
+    "monthly": 45,
+    "quarterly": 120,
+    "annual": 400,
+}
+DEFAULT_FRESHNESS_WINDOW_DAYS = 2
 
 
 @dataclass(frozen=True)
@@ -115,7 +126,40 @@ def growth_rate(current: float, previous: float) -> float | None:
     return round((float(current) / float(previous) - 1.0) * 100.0, 4)
 
 
-def build_monetary_dashboard(observations: Iterable[MonetaryObservation]) -> dict[str, Any]:
+def _parse_observation_time(value: str) -> datetime:
+    timestamp = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.replace(tzinfo=timezone.utc)
+    return timestamp.astimezone(timezone.utc)
+
+
+def observation_freshness(
+    observation: MonetaryObservation,
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Assess an observation using its declared frequency rather than one global TTL."""
+    current_time = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    observed_time = _parse_observation_time(observation.observed_at)
+    age_seconds = max(0.0, (current_time - observed_time).total_seconds())
+    frequency = (observation.frequency or "unknown").strip().lower()
+    window_days = FRESHNESS_WINDOWS_DAYS.get(frequency, DEFAULT_FRESHNESS_WINDOW_DAYS)
+    max_age_seconds = window_days * 86400
+    return {
+        "indicator": observation.indicator,
+        "frequency": observation.frequency,
+        "observed_at": observed_time.isoformat(),
+        "age_seconds": round(age_seconds, 3),
+        "max_age_seconds": max_age_seconds,
+        "fresh": age_seconds <= max_age_seconds,
+    }
+
+
+def build_monetary_dashboard(
+    observations: Iterable[MonetaryObservation],
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any]:
     latest: dict[str, MonetaryObservation] = {}
     revisions = 0
     for observation in observations:
@@ -133,15 +177,22 @@ def build_monetary_dashboard(observations: Iterable[MonetaryObservation]) -> dic
             "source": item.source,
             "frequency": item.frequency,
             "source_url": item.source_url,
+            "freshness": observation_freshness(item, now=now),
         }
         for name, item in latest.items()
     }
+    freshness = [item["freshness"] for item in values.values()]
     return {
         "source": CBI_SOURCE,
         "indicator_count": len(latest),
         "available_indicators": sorted(latest),
         "missing_indicators": sorted(set(MONETARY_INDICATORS) - set(latest)),
         "revision_count": revisions,
+        "freshness": {
+            "fresh_indicator_count": sum(item["fresh"] for item in freshness),
+            "stale_indicator_count": sum(not item["fresh"] for item in freshness),
+            "unknown_frequency_count": sum(item["frequency"] is None for item in freshness),
+        },
         "indicators": values,
     }
 
@@ -206,7 +257,6 @@ def build_monetary_policy_index(
     if reserve_requirement_change is not None:
         components["reserve_requirement"] = max(-8.0, min(8.0, -float(reserve_requirement_change) * 2.0))
     if net_open_market_operation is not None:
-        # Positive convention: injection/expansion; negative: absorption.
         components["open_market_operations"] = max(-10.0, min(10.0, float(net_open_market_operation)))
 
     if not components:
