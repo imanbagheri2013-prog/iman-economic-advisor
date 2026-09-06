@@ -41,9 +41,43 @@ def test_monetary_response_exposes_core_indicators():
                 "monetary_base": {"value": 40, "unit": "IRR bn"},
                 "bank_credit": {"value": 70, "unit": "IRR bn"},
             },
+            "monetary_growth": {
+                "monetary_base_growth": 12.5,
+                "liquidity_growth": 18.0,
+                "bank_credit_growth": 9.0,
+            },
+            "monetary_impulse": {"direction": "EXPANSION", "score": 15.25},
+            "monetary_policy_index": {"direction": "EXPANSIONARY", "score": 22.0},
+            "policy_transmission": {"currency_in_circulation_growth": 10.0},
+            "revision_count": 2,
+            "stored_observation_count": 25,
         },
     }
     result = build_response("نقدینگی و پایه پولی چطور است؟", report)
     assert result["intent"] == "monetary"
     assert result["answer"]["indicators"]["liquidity_m2"]["value"] == 100
     assert result["answer"]["indicators"]["monetary_base"]["value"] == 40
+    assert result["answer"]["monetary_growth"]["liquidity_growth"] == 18.0
+    assert result["answer"]["monetary_impulse"]["direction"] == "EXPANSION"
+    assert result["answer"]["monetary_policy_index"]["score"] == 22.0
+    assert result["answer"]["policy_transmission"]["currency_in_circulation_growth"] == 10.0
+    assert result["answer"]["revision_count"] == 2
+    assert result["answer"]["stored_observation_count"] == 25
+
+
+def test_portfolio_response_includes_monetary_context():
+    report = {
+        "status": "ok",
+        "finished_at": "2026-09-06T06:00:00+00:00",
+        "health_status": "HEALTHY",
+        "advisor": {"action": "HOLD"},
+        "intelligence": {"decision": {"action": "HOLD"}},
+        "central_bank": {
+            "ingestion_status": "CONNECTED",
+            "indicator_count": 1,
+            "indicators": {"liquidity_m2": {"value": 100}},
+            "monetary_policy_index": {"direction": "NEUTRAL_OR_MIXED"},
+        },
+    }
+    result = build_response("برای سبد سرمایه چه کار کنم؟", report)
+    assert result["answer"]["monetary"]["monetary_policy_index"]["direction"] == "NEUTRAL_OR_MIXED"
