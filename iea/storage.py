@@ -82,7 +82,7 @@ class Store:
             INSERT OR REPLACE INTO central_bank_observations
             (indicator, value, unit, observed_at, retrieved_at, source,
              frequency, source_url, revision, metadata)
-            VALUES (?, ?, ?, ?, datetime('now'), ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, datetime('now'), ?, ?, ?, ?, ?)
             """,
             (
                 observation.indicator,
