@@ -58,6 +58,7 @@ jobs:
           BLS_START_YEAR: "2021"
           BLS_END_YEAR: "2026"
           IEA_DB_PATH: "data/iea.sqlite3"
+          IEA_CBI_DATA_URL: ${{ secrets.IEA_CBI_DATA_URL }}
           IEA_CAPITAL: ${{ vars.IEA_CAPITAL }}
           IEA_EQUITY_INPUT_PATH: "config/equity_input.json"
           IEA_EQUITY_SYMBOL: ${{ vars.IEA_EQUITY_SYMBOL }}
