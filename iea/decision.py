@@ -116,7 +116,7 @@ def build_decision(report: dict[str, Any], policy: RiskPolicy = DEFAULT_RISK_POL
         result["sizing_rationale"] = f"capital-based advisory budget: {exposure_budget:.2f} from current capital {capital:.2f} at {exposure_multiplier:.0%} exposure; ratios remain unchanged as capital changes; no trade is executed."
     if position_size is not None:
         result["position_size"] = position_size
-        result["position_sizing_rationale"] = f"Position notional capped by {DEFAULT_SIZING_POLICY.max_risk_per_trade:.2%} capital risk and portfolio exposure; advisory sizing only, no trade is executed."
+        result["position_sizing_rationale"] = f"Position notional capped by {DEFAULT_SIZING_POLICY.max_risk_per_trade:.2%} capital risk using stop-loss distance and portfolio exposure; advisory sizing only, no trade is executed."
     if dynamic_stop_loss is not None:
         result["dynamic_stop_loss"] = dynamic_stop_loss; result["dynamic_stop_loss_rationale"] = f"Stop-loss derived from ATR at {float(atr_multiplier):.2f}x ATR; advisory level only, no trade is executed."
     if trade_levels is not None:
