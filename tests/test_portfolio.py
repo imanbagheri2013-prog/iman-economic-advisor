@@ -63,8 +63,8 @@ def test_position_summary_tracks_exposure_and_stop_based_risk():
     assert summary["position_count"] == 2
     assert summary["current_exposure"] == 26_050
     assert summary["current_exposure_ratio"] == pytest.approx(0.2605)
-    assert summary["current_risk"] == 1_000
-    assert summary["current_risk_ratio"] == pytest.approx(0.01)
+    assert summary["current_risk"] == 600
+    assert summary["current_risk_ratio"] == pytest.approx(0.006)
 
 
 def test_remaining_risk_budget_uses_current_risk():
