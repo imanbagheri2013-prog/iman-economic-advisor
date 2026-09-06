@@ -178,6 +178,7 @@ def build_decision(report: dict[str, Any], policy: RiskPolicy = DEFAULT_RISK_POL
         "risk_rationale": _risk_rationale(risk_score, risk_tier, risk_flags),
         "exposure_rationale": _exposure_rationale(exposure_multiplier, risk_tier),
     }
+    cbi = report.get("central_bank")
     if isinstance(cbi, dict) and cbi:
         result["central_bank"] = cbi
     if exposure_budget is not None:
