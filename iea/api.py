@@ -9,10 +9,19 @@ def _status_payload(report: dict[str, Any]) -> dict[str, Any]:
     intelligence = report.get("intelligence") or {}
     central_bank = report.get("central_bank") or {}
     portfolio = report.get("portfolio") or {}
+    meta = report.get("report_meta") or {}
     return {
+        "service": "iea-assistant",
         "status": report.get("status", "unknown"),
+        "pipeline_status": report.get("pipeline_status"),
         "finished_at": report.get("finished_at"),
         "health_status": report.get("health_status"),
+        "report": {
+            "fresh": meta.get("fresh"),
+            "age_seconds": meta.get("age_seconds"),
+            "max_age_seconds": meta.get("max_age_seconds"),
+        },
+        "market_session": report.get("market_session"),
         "market_status": intelligence.get("market_status"),
         "market_regime": intelligence.get("regime"),
         "market_score": intelligence.get("score"),
@@ -35,13 +44,13 @@ def _status_payload(report: dict[str, Any]) -> dict[str, Any]:
 
 
 def create_app(report_path: str = "health_report.json") -> Any:
-    """Create the optional HTTP API for the IEA assistant runtime."""
+    """Create the optional HTTP API backed by the scheduler's latest report."""
     try:
         from fastapi import FastAPI
     except ImportError as exc:  # pragma: no cover
         raise RuntimeError("FastAPI is required for the IEA API") from exc
 
-    app = FastAPI(title="IEA Assistant API", version="1.1.0")
+    app = FastAPI(title="IEA Assistant API", version="1.2.0")
 
     @app.get("/health")
     def health() -> dict[str, str]:
