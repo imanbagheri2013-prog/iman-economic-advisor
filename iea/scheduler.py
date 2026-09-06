@@ -10,7 +10,12 @@ from pathlib import Path
 import requests
 
 from .advisor import build_equity_advisor_report
-from .central_bank import build_monetary_dashboard
+from .central_bank import (
+    build_monetary_dashboard,
+    build_monetary_policy_index,
+    classify_monetary_impulse,
+    growth_rate,
+)
 from .eight_factor import analyze_eight_factor
 from .equity_fundamentals import FundamentalSnapshot
 from .equity_sources import fetch_live_equity_input
@@ -176,15 +181,80 @@ def _pull_with_retry():
     raise last_error  # pragma: no cover
 
 
+def _latest_pair(observations, indicator: str):
+    rows = sorted(
+        (item for item in observations if item.indicator == indicator),
+        key=lambda item: item.observed_at,
+    )
+    if not rows:
+        return None, None
+    latest = rows[-1]
+    previous = rows[-2] if len(rows) >= 2 else None
+    return latest, previous
+
+
+def _growth(observations, indicator: str) -> float | None:
+    latest, previous = _latest_pair(observations, indicator)
+    if latest is None or previous is None:
+        return None
+    return growth_rate(latest.value, previous.value)
+
+
+def _latest_change(observations, indicator: str) -> float | None:
+    latest, previous = _latest_pair(observations, indicator)
+    if latest is None or previous is None:
+        return None
+    return round(latest.value - previous.value, 6)
+
+
 def _central_bank_report(store, config: dict) -> dict:
     observations = store.central_bank_observations()
     dashboard = build_monetary_dashboard(observations)
+
+    base_growth = _growth(observations, "monetary_base")
+    liquidity_growth = _growth(observations, "liquidity_m2")
+    credit_growth = _growth(observations, "bank_credit")
+    central_bank_credit_growth = _growth(observations, "central_bank_credit_to_banks")
+    impulse = classify_monetary_impulse(
+        monetary_base_growth=base_growth,
+        liquidity_growth=liquidity_growth,
+        bank_credit_growth=credit_growth,
+    )
+    policy_index = build_monetary_policy_index(
+        monetary_base_growth=base_growth,
+        liquidity_growth=liquidity_growth,
+        bank_credit_growth=credit_growth,
+        policy_rate_change=_latest_change(observations, "policy_rate"),
+        reserve_requirement_change=_latest_change(observations, "reserve_requirement"),
+        net_open_market_operation=_latest_value(observations, "open_market_operations"),
+        central_bank_credit_growth=central_bank_credit_growth,
+    )
+    dashboard["monetary_growth"] = {
+        "monetary_base_growth": base_growth,
+        "liquidity_growth": liquidity_growth,
+        "bank_credit_growth": credit_growth,
+        "central_bank_credit_growth": central_bank_credit_growth,
+    }
+    dashboard["monetary_impulse"] = impulse
+    dashboard["monetary_policy_index"] = policy_index
+    dashboard["policy_transmission"] = {
+        "currency_in_circulation_growth": _growth(observations, "currency_in_circulation"),
+        "bank_deposits_growth": _growth(observations, "bank_deposits"),
+        "bank_reserves_growth": _growth(observations, "bank_reserves"),
+        "government_deposits_growth": _growth(observations, "government_deposits"),
+        "net_foreign_assets_growth": _growth(observations, "net_foreign_assets"),
+    }
     if config.get("cbi_data_url"):
         dashboard["ingestion_status"] = "CONNECTED" if observations else "NO_DATA"
     else:
         dashboard["ingestion_status"] = "NOT_CONFIGURED"
     dashboard["stored_observation_count"] = store.count_central_bank()
     return dashboard
+
+
+def _latest_value(observations, indicator: str) -> float | None:
+    latest, _ = _latest_pair(observations, indicator)
+    return None if latest is None else latest.value
 
 
 def run() -> int:
