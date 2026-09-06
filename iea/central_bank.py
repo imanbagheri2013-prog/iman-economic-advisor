@@ -1,12 +1,7 @@
 """Iran central-bank intelligence layer.
 
-This module normalizes monetary and policy observations so the advisor can
-track the Central Bank of Iran without coupling the intelligence engine to a
-single upstream website or undocumented endpoint.
-
-The production ingestion layer should populate observations from official
-CBI releases/data first, then approved fallback datasets when an official
-observation is unavailable. No value is fabricated here.
+Normalizes Central Bank of Iran monetary observations and policy events and
+turns them into transparent, auditable signals for the advisor.
 """
 
 from __future__ import annotations
@@ -18,9 +13,6 @@ from typing import Any, Iterable
 
 CBI_SOURCE = "CBI"
 
-# Core monetary indicators. The list intentionally separates stocks, growth
-# rates and policy instruments so the advisor can distinguish "money exists"
-# from "money is being created faster".
 MONETARY_INDICATORS = (
     "monetary_base",
     "liquidity_m2",
@@ -99,12 +91,8 @@ def normalize_observation(
     revision: bool = False,
     metadata: dict[str, Any] | None = None,
 ) -> MonetaryObservation:
-    """Validate and normalize one monetary observation."""
     name = _require_indicator(indicator)
-    if isinstance(observed_at, datetime):
-        timestamp = observed_at.isoformat()
-    else:
-        timestamp = str(observed_at)
+    timestamp = observed_at.isoformat() if isinstance(observed_at, datetime) else str(observed_at)
     numeric_value = float(value)
     if not unit:
         raise ValueError("unit is required")
@@ -122,14 +110,12 @@ def normalize_observation(
 
 
 def growth_rate(current: float, previous: float) -> float | None:
-    """Calculate period-over-period percentage growth without inventing a base."""
     if previous == 0:
         return None
     return round((float(current) / float(previous) - 1.0) * 100.0, 4)
 
 
 def build_monetary_dashboard(observations: Iterable[MonetaryObservation]) -> dict[str, Any]:
-    """Create a compact dashboard for the advisor's macro decision layer."""
     latest: dict[str, MonetaryObservation] = {}
     revisions = 0
     for observation in observations:
@@ -150,7 +136,6 @@ def build_monetary_dashboard(observations: Iterable[MonetaryObservation]) -> dic
         }
         for name, item in latest.items()
     }
-
     return {
         "source": CBI_SOURCE,
         "indicator_count": len(latest),
@@ -167,16 +152,9 @@ def classify_monetary_impulse(
     liquidity_growth: float | None,
     bank_credit_growth: float | None = None,
 ) -> dict[str, Any]:
-    """Classify the direction of monetary impulse from observed growth rates.
-
-    This is deliberately a transparent rule, not a claim about causality.
-    It gives the advisor a signal that can later be combined with inflation,
-    FX and real-economy data.
-    """
     growths = [x for x in (monetary_base_growth, liquidity_growth) if x is not None]
     if not growths:
         return {"status": "INSUFFICIENT_DATA", "direction": "UNKNOWN", "score": None}
-
     average = sum(growths) / len(growths)
     credit = bank_credit_growth if bank_credit_growth is not None else average
     if average >= 30 and credit >= 20:
@@ -187,7 +165,6 @@ def classify_monetary_impulse(
         direction = "CONTRACTIONARY_OR_TIGHT"
     else:
         direction = "MIXED"
-
     return {
         "status": "OK",
         "direction": direction,
@@ -198,8 +175,61 @@ def classify_monetary_impulse(
     }
 
 
+def build_monetary_policy_index(
+    *,
+    monetary_base_growth: float | None = None,
+    liquidity_growth: float | None = None,
+    bank_credit_growth: float | None = None,
+    policy_rate_change: float | None = None,
+    reserve_requirement_change: float | None = None,
+    net_open_market_operation: float | None = None,
+    central_bank_credit_growth: float | None = None,
+) -> dict[str, Any]:
+    """Build a transparent 0-100 monetary impulse index.
+
+    Positive values represent expansionary pressure; negative values represent
+    tightening. Missing inputs contribute no points, so the index never invents
+    a policy action from absent data. It is an analytical score, not a causal
+    estimate of inflation.
+    """
+    components: dict[str, float] = {}
+    if monetary_base_growth is not None:
+        components["monetary_base"] = max(-20.0, min(20.0, float(monetary_base_growth) / 2.0))
+    if liquidity_growth is not None:
+        components["liquidity_m2"] = max(-20.0, min(20.0, float(liquidity_growth) / 2.0))
+    if bank_credit_growth is not None:
+        components["bank_credit"] = max(-15.0, min(15.0, float(bank_credit_growth) / 2.0))
+    if central_bank_credit_growth is not None:
+        components["central_bank_credit_to_banks"] = max(-10.0, min(10.0, float(central_bank_credit_growth) / 2.0))
+    if policy_rate_change is not None:
+        components["policy_rate"] = max(-10.0, min(10.0, -float(policy_rate_change) * 2.0))
+    if reserve_requirement_change is not None:
+        components["reserve_requirement"] = max(-8.0, min(8.0, -float(reserve_requirement_change) * 2.0))
+    if net_open_market_operation is not None:
+        # Positive convention: injection/expansion; negative: absorption.
+        components["open_market_operations"] = max(-10.0, min(10.0, float(net_open_market_operation)))
+
+    if not components:
+        return {"status": "INSUFFICIENT_DATA", "score": None, "direction": "UNKNOWN", "components": {}}
+
+    raw = sum(components.values())
+    score = round(max(-100.0, min(100.0, raw)), 2)
+    if score >= 30:
+        direction = "EXPANSIONARY"
+    elif score <= -30:
+        direction = "CONTRACTIONARY"
+    else:
+        direction = "NEUTRAL_OR_MIXED"
+    return {
+        "status": "OK",
+        "score": score,
+        "direction": direction,
+        "components": components,
+        "coverage": round(len(components) / 7.0, 4),
+    }
+
+
 def summarize_policy_event(event: PolicyEvent) -> dict[str, Any]:
-    """Convert a CBI policy event into an advisor-friendly risk signal."""
     if event.event_type not in POLICY_EVENT_TYPES:
         raise ValueError(f"Unknown CBI policy event type: {event.event_type}")
     return {
