@@ -10,12 +10,13 @@ from pathlib import Path
 import requests
 
 from .advisor import build_equity_advisor_report
+from .central_bank import build_monetary_dashboard
 from .eight_factor import analyze_eight_factor
 from .equity_fundamentals import FundamentalSnapshot
 from .equity_sources import fetch_live_equity_input
 from .health import check_all, overall_status
 from .iran_market import IranMarketAdapter
-from .pipeline import pull_and_check
+from .pipeline import load_config, pull_and_check
 from .runtime import load_equity_payload
 
 REPORT_PATH = Path("health_report.json")
@@ -175,10 +176,22 @@ def _pull_with_retry():
     raise last_error  # pragma: no cover
 
 
+def _central_bank_report(store, config: dict) -> dict:
+    observations = store.central_bank_observations()
+    dashboard = build_monetary_dashboard(observations)
+    if config.get("cbi_data_url"):
+        dashboard["ingestion_status"] = "CONNECTED" if observations else "NO_DATA"
+    else:
+        dashboard["ingestion_status"] = "NOT_CONFIGURED"
+    dashboard["stored_observation_count"] = store.count_central_bank()
+    return dashboard
+
+
 def run() -> int:
     started = datetime.now(timezone.utc).isoformat()
     store = None
     try:
+        config = load_config()
         store, freshness_results, pipeline_status = _pull_with_retry()
         health_results = check_all(store)
         health_status = overall_status(health_results)
@@ -196,6 +209,7 @@ def run() -> int:
             intelligence = _closed_market_intelligence(market_status, session_date)
 
         equity_cycle = _build_equity_cycle(intelligence, capital)
+        central_bank = _central_bank_report(store, config)
 
         if pipeline_status != "OK":
             status, exit_code = "error", 1
@@ -211,10 +225,12 @@ def run() -> int:
             "pipeline_status": pipeline_status,
             "health_status": health_status,
             "observations": store.count(),
+            "central_bank_observations": store.count_central_bank(),
             "database": str(store.path),
             "market_session": {"status": market_status, "date": session_date},
             "freshness": freshness_results,
             "health": health_results,
+            "central_bank": central_bank,
             "intelligence": intelligence,
         }
         if equity_cycle is not None:
