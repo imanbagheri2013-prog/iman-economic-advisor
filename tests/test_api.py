@@ -5,10 +5,10 @@ from fastapi.testclient import TestClient
 from iea.api import create_app
 
 
-def _report():
+def _report(finished_at="2026-09-06T12:00:00+00:00"):
     return {
         "status": "ok",
-        "finished_at": "2026-09-06T12:00:00+00:00",
+        "finished_at": finished_at,
         "health_status": "HEALTHY",
         "intelligence": {
             "market_status": "OPEN",
@@ -53,6 +53,30 @@ def test_status_endpoint_reads_latest_report(tmp_path):
     assert payload["market_status"] == "OPEN"
     assert payload["central_bank"]["indicator_count"] == 17
     assert payload["portfolio"]["capital"] == 100_000_000
+    assert payload["report"]["fresh"] is True
+
+
+def test_ready_endpoint_accepts_fresh_report(tmp_path):
+    path = tmp_path / "report.json"
+    path.write_text(json.dumps(_report()), encoding="utf-8")
+    client = TestClient(create_app(str(path)))
+
+    response = client.get("/ready")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ready"
+    assert response.json()["report"]["fresh"] is True
+
+
+def test_ready_endpoint_rejects_stale_report(tmp_path):
+    path = tmp_path / "report.json"
+    path.write_text(json.dumps(_report("2020-01-01T00:00:00+00:00")), encoding="utf-8")
+    client = TestClient(create_app(str(path)))
+
+    response = client.get("/ready")
+
+    assert response.status_code == 503
+    assert "stale" in response.json()["detail"]
 
 
 def test_answer_endpoint_uses_latest_report(tmp_path):
