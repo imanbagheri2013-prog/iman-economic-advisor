@@ -1,0 +1,15 @@
+.git
+.github
+.pytest_cache
+__pycache__
+*.py[cod]
+*.sqlite
+*.db
+.env
+.env.*
+health_report.json
+iran_market_state.json
+reports/
+tests/
+docs/
+*.log
