@@ -13,6 +13,10 @@ from .sizing import (
 
 
 _STALE_MARKET_FACTORS = {"trend", "volume", "liquidity"}
+_CBI_IMPULSE_RISK_POINTS = {
+    "STRONG_EXPANSION": 20,
+    "EXPANSION": 10,
+}
 
 
 def _risk_assessment(report: dict[str, Any], policy: RiskPolicy = DEFAULT_RISK_POLICY) -> tuple[int, list[str]]:
@@ -61,6 +65,15 @@ def _risk_assessment(report: dict[str, Any], policy: RiskPolicy = DEFAULT_RISK_P
     ):
         score += policy.oi_trend_divergence_points
         flags.append("oi_trend_divergence")
+
+    cbi = report.get("central_bank") or {}
+    monetary_impulse = cbi.get("monetary_impulse") if isinstance(cbi, dict) else None
+    if isinstance(monetary_impulse, dict):
+        direction = str(monetary_impulse.get("direction") or "UNKNOWN")
+        points = _CBI_IMPULSE_RISK_POINTS.get(direction, 0)
+        if points:
+            score += points
+            flags.append(f"cbi_monetary_{direction.lower()}")
 
     quality = report.get("data_quality") or {}
     stale_factors = set(quality.get("stale_factors") or [])
@@ -165,6 +178,8 @@ def build_decision(report: dict[str, Any], policy: RiskPolicy = DEFAULT_RISK_POL
         "risk_rationale": _risk_rationale(risk_score, risk_tier, risk_flags),
         "exposure_rationale": _exposure_rationale(exposure_multiplier, risk_tier),
     }
+    if isinstance(cbi, dict) and cbi:
+        result["central_bank"] = cbi
     if exposure_budget is not None:
         result["exposure_budget"] = exposure_budget
         result["sizing_rationale"] = (
