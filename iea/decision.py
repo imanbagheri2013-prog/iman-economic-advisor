@@ -12,6 +12,9 @@ from .sizing import (
 )
 
 
+_STALE_MARKET_FACTORS = {"trend", "volume", "liquidity"}
+
+
 def _risk_assessment(report: dict[str, Any], policy: RiskPolicy = DEFAULT_RISK_POLICY) -> tuple[int, list[str]]:
     score = 0
     flags: list[str] = []
@@ -59,6 +62,12 @@ def _risk_assessment(report: dict[str, Any], policy: RiskPolicy = DEFAULT_RISK_P
         score += policy.oi_trend_divergence_points
         flags.append("oi_trend_divergence")
 
+    quality = report.get("data_quality") or {}
+    stale_factors = set(quality.get("stale_factors") or [])
+    critical_stale = sorted(stale_factors & _STALE_MARKET_FACTORS)
+    if critical_stale:
+        flags.append("stale_market_data")
+
     return min(score, 100), flags
 
 
@@ -92,8 +101,11 @@ def build_decision(report: dict[str, Any], policy: RiskPolicy = DEFAULT_RISK_POL
     risk_score, risk_flags = _risk_assessment(report, policy)
     risk_tier = _risk_tier(risk_score, policy)
     exposure_multiplier = _exposure_multiplier(risk_tier, policy)
+    stale_market_data = "stale_market_data" in risk_flags
 
     if score is None or coverage < policy.minimum_coverage:
+        action = "NO_TRADE"
+    elif stale_market_data:
         action = "NO_TRADE"
     elif "high_news_risk" in risk_flags or "liquidity_unavailable" in risk_flags or risk_score >= policy.critical_score:
         action = "NO_TRADE"
