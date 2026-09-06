@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .portfolio import build_capital_snapshot, normalize_capital
 from .risk import DEFAULT_RISK_POLICY, RiskPolicy
 from .sizing import (
     DEFAULT_SIZING_POLICY,
@@ -106,6 +107,14 @@ def _exposure_rationale(exposure_multiplier: float, risk_tier: str) -> str:
     )
 
 
+def _runtime_capital(report: dict[str, Any]) -> float | None:
+    """Resolve capital from runtime portfolio input, falling back to legacy report input."""
+    portfolio = report.get("portfolio")
+    if isinstance(portfolio, dict) and "capital" in portfolio:
+        return normalize_capital(portfolio.get("capital"))
+    return normalize_capital(report.get("capital"))
+
+
 def build_decision(report: dict[str, Any], policy: RiskPolicy = DEFAULT_RISK_POLICY) -> dict[str, Any]:
     score = report.get("score")
     coverage = float(report.get("coverage") or 0.0)
@@ -133,7 +142,7 @@ def build_decision(report: dict[str, Any], policy: RiskPolicy = DEFAULT_RISK_POL
     risk_multiplier = max(0.0, 1.0 - risk_score / 100.0)
     conviction *= risk_multiplier
 
-    capital = report.get("capital")
+    capital = _runtime_capital(report)
     exposure_budget = None
     position_size = None
     trade_levels = None
@@ -181,11 +190,21 @@ def build_decision(report: dict[str, Any], policy: RiskPolicy = DEFAULT_RISK_POL
     cbi = report.get("central_bank")
     if isinstance(cbi, dict) and cbi:
         result["central_bank"] = cbi
-    if exposure_budget is not None:
+    if capital is not None:
+        portfolio_snapshot = build_capital_snapshot(
+            capital,
+            currency=(report.get("portfolio") or {}).get("currency", "IRR")
+            if isinstance(report.get("portfolio"), dict)
+            else "IRR",
+            source=(report.get("portfolio") or {}).get("source", "runtime")
+            if isinstance(report.get("portfolio"), dict)
+            else "runtime",
+        )
+        result["portfolio"] = portfolio_snapshot
         result["exposure_budget"] = exposure_budget
         result["sizing_rationale"] = (
-            f"capital-based advisory budget: {exposure_budget:.2f} from capital {float(capital):.2f} "
-            f"at {exposure_multiplier:.0%} exposure; no trade is executed."
+            f"capital-based advisory budget: {exposure_budget:.2f} from current capital {capital:.2f} "
+            f"at {exposure_multiplier:.0%} exposure; ratios remain unchanged as capital changes; no trade is executed."
         )
     if position_size is not None:
         result["position_size"] = position_size
