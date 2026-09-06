@@ -80,7 +80,8 @@ def fetch_observations(
     are explicit configuration rather than undocumented endpoints. A source
     is accepted only when it responds successfully and contains valid rows.
     """
-    sources = [url] if url else _configured_sources()
+    explicit_source = url is not None
+    sources = [url] if explicit_source else _configured_sources()
     sources = [source for source in sources if source]
     if not sources:
         return []
@@ -92,6 +93,10 @@ def fetch_observations(
             response.raise_for_status()
             observations = parse_payload(response.text, response.headers.get("content-type", ""))
             return _validate_observations(observations)
+        except ValueError:
+            if explicit_source:
+                raise
+            errors.append(f"{target}: invalid CBI payload or observation")
         except Exception as exc:
             errors.append(f"{target}: {exc}")
 
