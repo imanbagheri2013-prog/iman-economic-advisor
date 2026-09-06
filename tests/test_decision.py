@@ -99,6 +99,31 @@ def test_oi_trend_divergence_adds_risk_and_sets_moderate_budget():
     assert "oi_trend_divergence" in result["risk_rationale"]
 
 
+def test_stale_core_market_data_forces_no_trade():
+    report = {
+        "score": 85,
+        "coverage": 0.875,
+        "regime": "RISK_ON",
+        "data_quality": {"stale_factors": ["trend"], "stale_factor_count": 1},
+        "factors": _safe_factors(),
+    }
+    result = build_decision(report)
+    assert result["action"] == "NO_TRADE"
+    assert "stale_market_data" in result["risk_flags"]
+
+
+def test_stale_non_core_factor_does_not_block_by_itself():
+    report = {
+        "score": 85,
+        "coverage": 0.875,
+        "regime": "RISK_ON",
+        "data_quality": {"stale_factors": ["fundamental"], "stale_factor_count": 1},
+        "factors": _safe_factors(),
+    }
+    result = build_decision(report)
+    assert result["action"] == "BUY_BIAS"
+
+
 def test_custom_policy_changes_decision_thresholds_without_changing_default():
     report = {"score": 68, "coverage": 0.8, "regime": "RISK_ON", "factors": _safe_factors()}
     default_result = build_decision(report)
