@@ -124,6 +124,49 @@ def test_stale_non_core_factor_does_not_block_by_itself():
     assert result["action"] == "BUY_BIAS"
 
 
+def test_cbi_strong_monetary_expansion_adds_risk_to_decision():
+    report = {
+        "score": 80,
+        "coverage": 1.0,
+        "regime": "RISK_ON",
+        "central_bank": {
+            "monetary_impulse": {
+                "status": "OK",
+                "direction": "STRONG_EXPANSION",
+                "score": 32.0,
+            }
+        },
+        "factors": _safe_factors(),
+    }
+    result = build_decision(report)
+    assert result["action"] == "BUY_BIAS"
+    assert result["risk_score"] == 20
+    assert "cbi_monetary_strong_expansion" in result["risk_flags"]
+    assert result["central_bank"] == report["central_bank"]
+
+
+def test_cbi_expansion_can_reduce_exposure_without_forcing_no_trade():
+    report = {
+        "score": 80,
+        "coverage": 1.0,
+        "regime": "RISK_ON",
+        "central_bank": {
+            "monetary_impulse": {
+                "status": "OK",
+                "direction": "EXPANSION",
+                "score": 18.0,
+            }
+        },
+        "factors": _safe_factors(),
+    }
+    result = build_decision(report)
+    assert result["action"] == "BUY_BIAS"
+    assert result["risk_score"] == 10
+    assert result["risk_tier"] == "LOW"
+    assert result["exposure_multiplier"] == 1.0
+    assert "cbi_monetary_expansion" in result["risk_flags"]
+
+
 def test_custom_policy_changes_decision_thresholds_without_changing_default():
     report = {"score": 68, "coverage": 0.8, "regime": "RISK_ON", "factors": _safe_factors()}
     default_result = build_decision(report)
@@ -300,4 +343,4 @@ def test_explicit_stop_loss_takes_precedence_over_atr():
     }
     result = build_decision(report)
     assert "dynamic_stop_loss" not in result
-    assert result["trade_levels"]["stop_loss"] == 95000.0
+    assert result["trade_levels"]["stop_loss"] == 95000
