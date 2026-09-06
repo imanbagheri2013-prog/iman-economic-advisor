@@ -1,28 +1,59 @@
-import os, requests
+import os
+import time
 from datetime import datetime, timezone
+
+import requests
+
 from ..models import Observation
 from ..quality import quality
 
-URL = 'https://api.stlouisfed.org/fred/series/observations'
+URL = "https://api.stlouisfed.org/fred/series/observations"
+MAX_ATTEMPTS = 3
+RETRY_DELAYS_SECONDS = (2, 5)
+
 
 class FRED:
     def __init__(self, api_key=None):
-        self.api_key = api_key or os.getenv('FRED_API_KEY')
+        self.api_key = api_key or os.getenv("FRED_API_KEY")
         if not self.api_key:
-            raise RuntimeError('FRED_API_KEY is not set')
+            raise RuntimeError("FRED_API_KEY is not set")
 
     def observations(self, series_id, limit=100):
-        params = {'series_id':series_id, 'api_key':self.api_key,
-                  'file_type':'json', 'sort_order':'desc', 'limit':limit}
-        r = requests.get(URL, params=params, timeout=30)
-        r.raise_for_status()
+        params = {
+            "series_id": series_id,
+            "api_key": self.api_key,
+            "file_type": "json",
+            "sort_order": "desc",
+            "limit": limit,
+        }
+        response = None
+        for attempt in range(1, MAX_ATTEMPTS + 1):
+            response = requests.get(URL, params=params, timeout=30)
+            if response.status_code not in {429, 500, 502, 503, 504} or attempt == MAX_ATTEMPTS:
+                break
+            retry_after = response.headers.get("Retry-After")
+            try:
+                delay = max(0, min(float(retry_after), 30)) if retry_after else RETRY_DELAYS_SECONDS[attempt - 1]
+            except ValueError:
+                delay = RETRY_DELAYS_SECONDS[attempt - 1]
+            time.sleep(delay)
+        response.raise_for_status()
+
         now = datetime.now(timezone.utc)
         out = []
-        for item in r.json().get('observations', []):
-            raw = item.get('value')
-            value = None if raw in (None, '.') else float(raw)
-            date = datetime.fromisoformat(item['date']).replace(tzinfo=timezone.utc)
-            out.append(Observation(provider='fred', series_id=series_id, date=date,
-                value=value, retrieved_at=now, quality=quality(value, now),
-                status='OK' if value is not None else 'MISSING'))
+        for item in response.json().get("observations", []):
+            raw = item.get("value")
+            value = None if raw in (None, ".") else float(raw)
+            date = datetime.fromisoformat(item["date"]).replace(tzinfo=timezone.utc)
+            out.append(
+                Observation(
+                    provider="fred",
+                    series_id=series_id,
+                    date=date,
+                    value=value,
+                    retrieved_at=now,
+                    quality=quality(value, now),
+                    status="OK" if value is not None else "MISSING",
+                )
+            )
         return out
