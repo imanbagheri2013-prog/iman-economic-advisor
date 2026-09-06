@@ -48,10 +48,13 @@ def _monetary_summary(report: dict[str, Any]) -> dict[str, Any]:
             "currency_in_circulation",
             "bank_deposits",
             "bank_credit",
+            "central_bank_credit_to_banks",
+            "government_claims_on_central_bank",
             "bank_reserves",
             "reserve_requirement",
             "policy_rate",
             "interbank_rate",
+            "open_market_operations",
             "government_deposits",
             "net_foreign_assets",
             "foreign_exchange_reserves",
@@ -63,6 +66,12 @@ def _monetary_summary(report: dict[str, Any]) -> dict[str, Any]:
         "observed_indicator_count": monetary.get("indicator_count", 0),
         "missing_indicators": monetary.get("missing_indicators", []),
         "indicators": selected,
+        "monetary_growth": monetary.get("monetary_growth", {}),
+        "monetary_impulse": monetary.get("monetary_impulse", {}),
+        "monetary_policy_index": monetary.get("monetary_policy_index", {}),
+        "policy_transmission": monetary.get("policy_transmission", {}),
+        "revision_count": monetary.get("revision_count", 0),
+        "stored_observation_count": monetary.get("stored_observation_count", 0),
     }
 
 
@@ -96,6 +105,7 @@ def build_response(question: str, report: dict[str, Any]) -> dict[str, Any]:
         response["answer"] = {
             "advisor": report.get("advisor"),
             "market": _market_summary(report),
+            "monetary": _monetary_summary(report),
             "health_status": report.get("health_status"),
         }
     else:
