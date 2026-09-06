@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 from iea import scheduler
+from iea.central_bank import normalize_observation
 
 
 SNAPSHOT = {
@@ -125,3 +126,33 @@ def test_save_report_persists_json(monkeypatch, tmp_path):
 
     saved = json.loads(report_path.read_text(encoding="utf-8"))
     assert saved == {"status": "ok", "observations": 42}
+
+
+def test_central_bank_report_builds_growth_impulse_and_policy_index():
+    class FakeStore:
+        def central_bank_observations(self):
+            return [
+                normalize_observation("monetary_base", 100, "IRR_bn", "2026-08-01"),
+                normalize_observation("monetary_base", 140, "IRR_bn", "2026-09-01"),
+                normalize_observation("liquidity_m2", 200, "IRR_bn", "2026-08-01"),
+                normalize_observation("liquidity_m2", 260, "IRR_bn", "2026-09-01"),
+                normalize_observation("bank_credit", 100, "IRR_bn", "2026-08-01"),
+                normalize_observation("bank_credit", 130, "IRR_bn", "2026-09-01"),
+                normalize_observation("policy_rate", 20, "%", "2026-08-01"),
+                normalize_observation("policy_rate", 18, "%", "2026-09-01"),
+                normalize_observation("reserve_requirement", 10, "%", "2026-08-01"),
+                normalize_observation("reserve_requirement", 9, "%", "2026-09-01"),
+                normalize_observation("open_market_operations", 5, "IRR_bn", "2026-09-01"),
+            ]
+
+        def count_central_bank(self):
+            return 11
+
+    report = scheduler._central_bank_report(FakeStore(), {"cbi_data_url": "https://official.example/cbi.csv"})
+
+    assert report["ingestion_status"] == "CONNECTED"
+    assert report["monetary_growth"]["monetary_base_growth"] == 40.0
+    assert report["monetary_impulse"]["direction"] == "STRONG_EXPANSION"
+    assert report["monetary_policy_index"]["status"] == "OK"
+    assert report["monetary_policy_index"]["direction"] == "EXPANSIONARY"
+    assert report["policy_transmission"]["currency_in_circulation_growth"] is None
