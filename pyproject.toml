@@ -8,5 +8,8 @@ version = "1.2.0"
 description = "IEA Economic Data Engine"
 requires-python = ">=3.9"
 
+[project.scripts]
+iea-assistant = "iea.assistant_runtime:main"
+
 [tool.setuptools.packages.find]
 include = ["iea*"]
