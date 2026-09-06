@@ -107,6 +107,8 @@ def build_decision(report: dict[str, Any], policy: RiskPolicy = DEFAULT_RISK_POL
             position_size = round(position_size, DEFAULT_SIZING_POLICY.rounding_digits)
             if action in {"BUY_BIAS", "SELL_BIAS"} and position_size > 0:
                 side = "BUY" if action == "BUY_BIAS" else "SELL"; trade_levels = calculate_trade_levels(entry_price, stop_loss, side, risk_reward_ratio)
+        if position_size is None and entry_price is not None and stop_loss is not None and action == "NO_TRADE":
+            position_size = 0.0
     result = {"action": action, "conviction": conviction, "risk_score": risk_score, "risk_flags": risk_flags, "risk_tier": risk_tier, "risk_multiplier": risk_multiplier, "exposure_multiplier": exposure_multiplier, "risk_rationale": _risk_rationale(risk_score, risk_tier, risk_flags), "exposure_rationale": _exposure_rationale(exposure_multiplier, risk_tier)}
     cbi = report.get("central_bank")
     if isinstance(cbi, dict) and cbi: result["central_bank"] = cbi
