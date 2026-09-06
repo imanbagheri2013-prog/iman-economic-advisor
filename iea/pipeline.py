@@ -6,6 +6,7 @@ from typing import Any
 
 import yaml
 
+from .central_bank_provider import fetch_observations
 from .data_freshness import check_table_freshness
 from .providers.bls import BLS
 from .providers.fred import FRED
@@ -33,6 +34,7 @@ def load_config(registry_path: str | Path = DEFAULT_REGISTRY) -> dict[str, Any]:
         "registry_path": path,
         "fred_series": list((registry.get("fred") or {}).keys()),
         "bls_series": list((registry.get("bls") or {}).keys()),
+        "cbi_data_url": os.getenv("IEA_CBI_DATA_URL", "").strip() or None,
         "closed_dates": [
             value.strip()
             for value in os.getenv("IEA_CLOSED_DATES", "").split(",")
@@ -62,6 +64,9 @@ def pull(registry_path: str | Path = DEFAULT_REGISTRY) -> Store:
             for observation in observations:
                 store.upsert(observation)
 
+        for observation in fetch_observations(config["cbi_data_url"]):
+            store.upsert_central_bank(observation)
+
         return store
     except Exception:
         store.close()
@@ -76,8 +81,6 @@ def pull_and_check(registry_path: str | Path = DEFAULT_REGISTRY):
             db_path=store.path,
             table_name="observations",
             max_age_hours=48,
-            # FRED/BLS are business-day economic data sources; weekends
-            # should not consume the freshness budget.
             closed_weekdays={5, 6},
             closed_dates=config["closed_dates"],
         )
