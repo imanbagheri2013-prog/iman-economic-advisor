@@ -45,6 +45,15 @@ def _status_payload(report: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _load_fresh_report(report_path: str) -> dict[str, Any]:
+    """Load the trusted report and enforce the freshness boundary for decisions."""
+    report = load_report(report_path)
+    meta = report.get("report_meta") or {}
+    if meta.get("fresh") is not True:
+        raise RuntimeError("IEA trusted report is stale; refresh the scheduler before requesting an answer")
+    return report
+
+
 def create_app(report_path: str = "health_report.json") -> Any:
     """Create the HTTP API backed by the scheduler's latest trusted report."""
     try:
@@ -75,6 +84,10 @@ def create_app(report_path: str = "health_report.json") -> Any:
 
     @app.get("/answer")
     def get_answer(question: str) -> dict[str, Any]:
+        try:
+            _load_fresh_report(report_path)
+        except (RuntimeError, ValueError) as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
         return answer(question, report_path)
 
     return app
