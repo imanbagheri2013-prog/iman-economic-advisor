@@ -90,3 +90,14 @@ def test_answer_endpoint_uses_latest_report(tmp_path):
 
     assert response.status_code == 200
     assert response.json()["assistant"] == "IEA"
+
+
+def test_answer_endpoint_rejects_stale_report(tmp_path):
+    path = tmp_path / "report.json"
+    path.write_text(json.dumps(_report("2020-01-01T00:00:00+00:00")), encoding="utf-8")
+    client = TestClient(create_app(str(path)))
+
+    response = client.get("/answer", params={"question": "وضعیت بازار چیست؟"})
+
+    assert response.status_code == 503
+    assert "stale" in response.json()["detail"]
