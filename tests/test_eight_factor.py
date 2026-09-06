@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from iea.intelligence_v2 import FACTOR_NAMES, FactorRegistry, FactorResult, aggregate
 
@@ -85,3 +85,30 @@ def test_aggregate_explainability_preserves_factor_order():
     report = aggregate(results, minimum_coverage=0.25)
     assert list(report["factor_weights"]) == ["fundamental", "trend"]
     assert list(report["factor_contributions"]) == ["fundamental", "trend"]
+
+
+def test_stale_timestamp_is_explicitly_classified_and_not_usable():
+    stale_timestamp = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+    results = [
+        FactorResult("trend", "OK", 90.0, confidence=0.0, timestamp=stale_timestamp),
+        FactorResult("fundamental", "OK", 70.0, confidence=1.0),
+        *[FactorResult(name, "UNAVAILABLE") for name in FACTOR_NAMES[2:] if name != "trend"],
+    ]
+    report = aggregate(results, minimum_coverage=0.25)
+    quality = report["data_quality"]
+    assert quality["stale_factor_count"] == 1
+    assert quality["stale_factors"] == ["trend"]
+    assert quality["factors"][1]["quality_status"] == "STALE"
+    assert quality["usable_factor_count"] == 1
+
+
+def test_not_applicable_factor_is_not_marked_stale():
+    result = FactorResult(
+        "funding_rate",
+        "UNAVAILABLE",
+        details={"reason": "not_applicable_to_cash_equities", "not_applicable": True},
+    )
+    report = aggregate([result] + [FactorResult(name, "UNAVAILABLE") for name in FACTOR_NAMES if name != "funding_rate"])
+    quality = report["data_quality"]
+    assert quality["not_applicable_count"] == 1
+    assert quality["stale_factor_count"] == 0
