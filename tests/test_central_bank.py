@@ -2,21 +2,17 @@ from iea.central_bank import (
     MONETARY_INDICATORS,
     PolicyEvent,
     build_monetary_dashboard,
+    build_monetary_policy_index,
     classify_monetary_impulse,
     growth_rate,
     normalize_observation,
     summarize_policy_event,
 )
+from iea.central_bank_provider import fetch_observations
 
 
 def test_normalize_cbi_observation_validates_and_normalizes_indicator():
-    observation = normalize_observation(
-        "LIQUIDITY_M2",
-        100.0,
-        "IRR_bn",
-        "2026-09-01",
-        frequency="monthly",
-    )
+    observation = normalize_observation("LIQUIDITY_M2", 100.0, "IRR_bn", "2026-09-01", frequency="monthly")
     assert observation.indicator == "liquidity_m2"
     assert observation.value == 100.0
     assert observation.source == "CBI"
@@ -51,11 +47,7 @@ def test_dashboard_tracks_latest_observation_and_missing_indicators():
 
 
 def test_monetary_impulse_classification_is_transparent():
-    result = classify_monetary_impulse(
-        monetary_base_growth=35,
-        liquidity_growth=32,
-        bank_credit_growth=25,
-    )
+    result = classify_monetary_impulse(monetary_base_growth=35, liquidity_growth=32, bank_credit_growth=25)
     assert result["status"] == "OK"
     assert result["direction"] == "STRONG_EXPANSION"
     assert result["score"] == 33.5
@@ -64,6 +56,25 @@ def test_monetary_impulse_classification_is_transparent():
 def test_monetary_impulse_requires_data():
     result = classify_monetary_impulse(monetary_base_growth=None, liquidity_growth=None)
     assert result == {"status": "INSUFFICIENT_DATA", "direction": "UNKNOWN", "score": None}
+
+
+def test_monetary_policy_index_is_transparent_and_bounded():
+    result = build_monetary_policy_index(
+        monetary_base_growth=30,
+        liquidity_growth=25,
+        bank_credit_growth=20,
+        policy_rate_change=-2,
+        reserve_requirement_change=-1,
+        net_open_market_operation=5,
+    )
+    assert result["status"] == "OK"
+    assert result["direction"] == "EXPANSIONARY"
+    assert -100 <= result["score"] <= 100
+    assert result["coverage"] > 0.8
+
+
+def test_monetary_policy_index_requires_data():
+    assert build_monetary_policy_index()["status"] == "INSUFFICIENT_DATA"
 
 
 def test_policy_event_is_normalized_for_advisor():
@@ -79,3 +90,31 @@ def test_policy_event_is_normalized_for_advisor():
     assert result["event_type"] == "liquidity_injection"
     assert result["direction"] == "EXPANSIONARY"
     assert result["magnitude"] == 1000
+
+
+def test_cbi_provider_uses_fallback_after_primary_failure(monkeypatch):
+    class Response:
+        def __init__(self, text, status=200):
+            self.text = text
+            self.status = status
+            self.headers = {"content-type": "text/csv"}
+
+        def raise_for_status(self):
+            if self.status >= 400:
+                raise RuntimeError("upstream failure")
+
+    calls = []
+
+    def fake_get(url, timeout):
+        calls.append(url)
+        if url == "https://official.example/cbi.csv":
+            return Response("", status=503)
+        return Response("indicator,value,observed_at\nliquidity_m2,100,2026-09-01")
+
+    monkeypatch.setattr("iea.central_bank_provider.requests.get", fake_get)
+    monkeypatch.setenv("IEA_CBI_DATA_URL", "https://official.example/cbi.csv")
+    monkeypatch.setenv("IEA_CBI_FALLBACK_URLS", "https://fallback.example/cbi.csv")
+
+    observations = fetch_observations()
+    assert observations[0].indicator == "liquidity_m2"
+    assert calls == ["https://official.example/cbi.csv", "https://fallback.example/cbi.csv"]
