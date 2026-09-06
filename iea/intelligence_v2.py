@@ -87,12 +87,25 @@ def _is_not_applicable(result: FactorResult) -> bool:
     }
 
 
+def _is_stale(result: FactorResult) -> bool:
+    """Treat an explicitly timestamped OK factor with zero confidence as stale."""
+    return bool(
+        result.status == "OK"
+        and result.timestamp
+        and _confidence_weight(result) <= 0.0
+        and not _is_not_applicable(result)
+    )
+
+
 def _factor_quality(result: FactorResult) -> dict[str, Any]:
     """Return an operational quality record without changing the factor schema."""
     not_applicable = _is_not_applicable(result)
-    usable = result.status == "OK" and result.score is not None
+    stale = _is_stale(result)
+    usable = result.status == "OK" and result.score is not None and not stale
     if not_applicable:
         quality_status = "NOT_APPLICABLE"
+    elif stale:
+        quality_status = "STALE"
     elif usable:
         quality_status = "USABLE"
     else:
@@ -102,6 +115,7 @@ def _factor_quality(result: FactorResult) -> dict[str, Any]:
         "status": result.status,
         "quality_status": quality_status,
         "usable": usable,
+        "stale": stale,
         "not_applicable": not_applicable,
         "confidence": round(_confidence_weight(result), 3) if usable else 0.0,
         "provider": result.provider,
@@ -116,6 +130,7 @@ def data_quality_summary(results: list[FactorResult]) -> dict[str, Any]:
     applicable = [record for record in records if not record["not_applicable"]]
     usable = [record for record in applicable if record["usable"]]
     not_applicable = [record for record in records if record["not_applicable"]]
+    stale = [record for record in applicable if record["stale"]]
 
     applicable_count = len(applicable)
     usable_count = len(usable)
@@ -142,6 +157,8 @@ def data_quality_summary(results: list[FactorResult]) -> dict[str, Any]:
         "applicable_factor_count": applicable_count,
         "usable_factor_count": usable_count,
         "not_applicable_count": len(not_applicable),
+        "stale_factor_count": len(stale),
+        "stale_factors": [record["name"] for record in stale],
         "usable_coverage": round(usable_coverage, 3),
         "factors": records,
     }
