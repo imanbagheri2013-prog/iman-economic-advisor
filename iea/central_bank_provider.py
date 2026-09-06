@@ -14,9 +14,17 @@ from .central_bank import MonetaryObservation, normalize_observation
 DEFAULT_TIMEOUT = 20
 
 
-def _configured_url() -> str | None:
-    value = os.getenv("IEA_CBI_DATA_URL", "").strip()
-    return value or None
+def _configured_sources() -> list[str]:
+    """Return sources in trust order: official/configured first, fallbacks next."""
+    sources: list[str] = []
+    primary = os.getenv("IEA_CBI_DATA_URL", "").strip()
+    if primary:
+        sources.append(primary)
+    for value in os.getenv("IEA_CBI_FALLBACK_URLS", "").split(","):
+        target = value.strip()
+        if target and target not in sources:
+            sources.append(target)
+    return sources
 
 
 def _parse_row(row: dict[str, Any]) -> MonetaryObservation:
@@ -34,13 +42,7 @@ def _parse_row(row: dict[str, Any]) -> MonetaryObservation:
 
 
 def parse_payload(text: str, content_type: str = "") -> list[MonetaryObservation]:
-    """Parse the stable ingestion contract used by the CBI adapter.
-
-    Supported formats are JSON arrays/objects with an ``observations`` array
-    and CSV with columns: indicator,value,unit,observed_at,frequency,source,
-    source_url,revision. The upstream URL is intentionally configurable so
-    official CBI exports can be used without hard-coding undocumented APIs.
-    """
+    """Parse JSON or CSV using the stable CBI ingestion contract."""
     stripped = text.lstrip()
     if "json" in content_type.lower() or stripped.startswith("[") or stripped.startswith("{"):
         payload = json.loads(text)
@@ -56,20 +58,41 @@ def parse_payload(text: str, content_type: str = "") -> list[MonetaryObservation
     return [_parse_row(row) for row in reader]
 
 
-def fetch_observations(url: str | None = None, *, timeout: int = DEFAULT_TIMEOUT) -> list[MonetaryObservation]:
-    target = url or _configured_url()
-    if not target:
-        return []
-    response = requests.get(target, timeout=timeout)
-    response.raise_for_status()
-    observations = parse_payload(response.text, response.headers.get("content-type", ""))
+def _validate_observations(observations: list[MonetaryObservation]) -> list[MonetaryObservation]:
     now = datetime.now(timezone.utc)
     for observation in observations:
-        # Reject obviously malformed future observations while allowing
-        # timezone-free historical source dates.
         parsed = datetime.fromisoformat(observation.observed_at.replace("Z", "+00:00"))
         if parsed.tzinfo is None:
             parsed = parsed.replace(tzinfo=timezone.utc)
         if parsed > now:
             raise ValueError(f"CBI observation is in the future: {observation.observed_at}")
     return observations
+
+
+def fetch_observations(
+    url: str | None = None,
+    *,
+    timeout: int = DEFAULT_TIMEOUT,
+) -> list[MonetaryObservation]:
+    """Fetch CBI data with deterministic primary/fallback source ordering.
+
+    The primary source should be an official CBI export/feed. Fallback URLs
+    are explicit configuration rather than undocumented endpoints. A source
+    is accepted only when it responds successfully and contains valid rows.
+    """
+    sources = [url] if url else _configured_sources()
+    sources = [source for source in sources if source]
+    if not sources:
+        return []
+
+    errors: list[str] = []
+    for target in sources:
+        try:
+            response = requests.get(target, timeout=timeout)
+            response.raise_for_status()
+            observations = parse_payload(response.text, response.headers.get("content-type", ""))
+            return _validate_observations(observations)
+        except Exception as exc:
+            errors.append(f"{target}: {exc}")
+
+    raise RuntimeError("All configured CBI data sources failed: " + " | ".join(errors))
