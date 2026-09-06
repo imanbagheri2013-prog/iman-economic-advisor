@@ -96,9 +96,10 @@ def test_stale_timestamp_is_explicitly_classified_and_not_usable():
     ]
     report = aggregate(results, minimum_coverage=0.25)
     quality = report["data_quality"]
+    stale_record = next(record for record in quality["factors"] if record["name"] == "trend")
     assert quality["stale_factor_count"] == 1
     assert quality["stale_factors"] == ["trend"]
-    assert quality["factors"][1]["quality_status"] == "STALE"
+    assert stale_record["quality_status"] == "STALE"
     assert quality["usable_factor_count"] == 1
 
 
