@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from iea.central_bank import (
     MONETARY_INDICATORS,
     PolicyEvent,
@@ -6,6 +8,7 @@ from iea.central_bank import (
     classify_monetary_impulse,
     growth_rate,
     normalize_observation,
+    observation_freshness,
     summarize_policy_event,
 )
 from iea.central_bank_provider import fetch_observations
@@ -44,6 +47,29 @@ def test_dashboard_tracks_latest_observation_and_missing_indicators():
     assert dashboard["revision_count"] == 1
     assert "monetary_base" not in dashboard["missing_indicators"]
     assert len(dashboard["missing_indicators"]) == len(MONETARY_INDICATORS) - 2
+
+
+def test_observation_freshness_uses_frequency_specific_window():
+    now = datetime(2026, 9, 6, tzinfo=timezone.utc)
+    monthly = normalize_observation(
+        "liquidity_m2", 100, "IRR_bn", "2026-07-25T00:00:00+00:00", frequency="monthly"
+    )
+    daily = normalize_observation(
+        "monetary_base", 100, "IRR_bn", "2026-09-04T00:00:00+00:00", frequency="daily"
+    )
+    assert observation_freshness(monthly, now=now)["fresh"] is True
+    assert observation_freshness(daily, now=now)["fresh"] is True
+
+
+def test_dashboard_exposes_cbi_freshness_counts():
+    now = datetime(2026, 9, 6, tzinfo=timezone.utc)
+    observations = [
+        normalize_observation("liquidity_m2", 100, "IRR_bn", "2026-09-01", frequency="monthly"),
+        normalize_observation("monetary_base", 50, "IRR_bn", "2026-08-20", frequency="daily"),
+    ]
+    dashboard = build_monetary_dashboard(observations, now=now)
+    assert dashboard["freshness"]["fresh_indicator_count"] == 1
+    assert dashboard["freshness"]["stale_indicator_count"] == 1
 
 
 def test_monetary_impulse_classification_is_transparent():
