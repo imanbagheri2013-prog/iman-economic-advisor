@@ -103,12 +103,17 @@ def build_decision(report: dict[str, Any], policy: RiskPolicy = DEFAULT_RISK_POL
         available_exposure = float(portfolio_budget["available_exposure_budget"])
         remaining_risk = float(portfolio_budget["remaining_risk_budget"])
         exposure_budget = min(exposure_budget, available_exposure)
-        if position_summary["position_count"] >= portfolio_budget["max_positions"] or remaining_risk <= 0:
-            exposure_budget = 0.0
+        has_explicit_positions = positions is not None
+        portfolio_blocked = has_explicit_positions and (position_summary["position_count"] >= portfolio_budget["max_positions"] or remaining_risk <= 0)
+        if portfolio_blocked:
+            action = "NO_TRADE"; conviction = 0.0; risk_flags.append("portfolio_risk_limit"); exposure_budget = 0.0
         if entry_price is not None and stop_loss is None and atr is not None and action in {"BUY_BIAS", "SELL_BIAS"}:
             side = "BUY" if action == "BUY_BIAS" else "SELL"; dynamic_stop_loss = calculate_dynamic_stop_loss(entry_price, side, atr, atr_multiplier); stop_loss = dynamic_stop_loss
-        if entry_price is not None and stop_loss is not None:
+        if entry_price is not None and stop_loss is not None and exposure_budget > 0:
             position_size = min(calculate_position_size(capital, exposure_multiplier, entry_price, stop_loss), exposure_budget)
+            per_trade_risk = float(portfolio_budget["per_trade_risk_budget"])
+            if per_trade_risk > 0:
+                position_size = min(position_size, position_size * min(1.0, remaining_risk / per_trade_risk))
             position_size = round(position_size, DEFAULT_SIZING_POLICY.rounding_digits)
             if action in {"BUY_BIAS", "SELL_BIAS"} and position_size > 0:
                 side = "BUY" if action == "BUY_BIAS" else "SELL"; trade_levels = calculate_trade_levels(entry_price, stop_loss, side, risk_reward_ratio)
