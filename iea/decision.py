@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .portfolio import build_capital_snapshot, build_portfolio_risk_budget, normalize_capital
+from .portfolio import build_capital_snapshot, build_portfolio_risk_budget, normalize_capital, summarize_positions
 from .risk import DEFAULT_RISK_POLICY, RiskPolicy
 from .sizing import DEFAULT_SIZING_POLICY, calculate_dynamic_stop_loss, calculate_exposure_budget, calculate_position_size, calculate_trade_levels
 
@@ -84,26 +84,33 @@ def build_decision(report: dict[str, Any], policy: RiskPolicy = DEFAULT_RISK_POL
     capital = _runtime_capital(report); exposure_budget = None; position_size = None; trade_levels = None
     entry_price = report.get("entry_price"); stop_loss = report.get("stop_loss"); atr = report.get("atr")
     atr_multiplier = report.get("atr_multiplier", DEFAULT_SIZING_POLICY.default_atr_multiplier); risk_reward_ratio = report.get("risk_reward_ratio", 2.0); dynamic_stop_loss = None
-    if entry_price is not None and stop_loss is None and atr is not None and action in {"BUY_BIAS", "SELL_BIAS"}:
-        side = "BUY" if action == "BUY_BIAS" else "SELL"; dynamic_stop_loss = calculate_dynamic_stop_loss(entry_price, side, atr, atr_multiplier); stop_loss = dynamic_stop_loss
-    portfolio_budget = None
+    portfolio_budget = None; position_summary = None
     if capital is not None:
-        exposure_budget = calculate_exposure_budget(capital, exposure_multiplier)
         portfolio_input = report.get("portfolio") if isinstance(report.get("portfolio"), dict) else {}
+        positions = portfolio_input.get("positions")
+        position_summary = summarize_positions(capital, positions) if positions is not None else summarize_positions(capital, [])
+        exposure_budget = calculate_exposure_budget(capital, exposure_multiplier)
         portfolio_budget = build_portfolio_risk_budget(
             capital,
             exposure_multiplier=exposure_multiplier,
             max_risk_per_trade=float(portfolio_input.get("max_risk_per_trade", DEFAULT_SIZING_POLICY.max_risk_per_trade)),
             max_total_risk=float(portfolio_input.get("max_total_risk", 0.06)),
             max_positions=int(portfolio_input.get("max_positions", 6)),
-            invested_ratio=float(portfolio_input.get("invested_ratio", 0.0)),
+            invested_ratio=float(portfolio_input.get("invested_ratio", position_summary["current_exposure_ratio"])),
+            current_risk=float(position_summary["current_risk"]),
+            position_count=int(position_summary["position_count"]),
         )
-        available_exposure = portfolio_budget["available_exposure_budget"]
-        exposure_budget = min(exposure_budget, float(available_exposure))
+        available_exposure = float(portfolio_budget["available_exposure_budget"])
+        remaining_risk = float(portfolio_budget["remaining_risk_budget"])
+        exposure_budget = min(exposure_budget, available_exposure)
+        if position_summary["position_count"] >= portfolio_budget["max_positions"] or remaining_risk <= 0:
+            exposure_budget = 0.0
+        if entry_price is not None and stop_loss is None and atr is not None and action in {"BUY_BIAS", "SELL_BIAS"}:
+            side = "BUY" if action == "BUY_BIAS" else "SELL"; dynamic_stop_loss = calculate_dynamic_stop_loss(entry_price, side, atr, atr_multiplier); stop_loss = dynamic_stop_loss
         if entry_price is not None and stop_loss is not None:
             position_size = min(calculate_position_size(capital, exposure_multiplier, entry_price, stop_loss), exposure_budget)
             position_size = round(position_size, DEFAULT_SIZING_POLICY.rounding_digits)
-            if action in {"BUY_BIAS", "SELL_BIAS"}:
+            if action in {"BUY_BIAS", "SELL_BIAS"} and position_size > 0:
                 side = "BUY" if action == "BUY_BIAS" else "SELL"; trade_levels = calculate_trade_levels(entry_price, stop_loss, side, risk_reward_ratio)
     result = {"action": action, "conviction": conviction, "risk_score": risk_score, "risk_flags": risk_flags, "risk_tier": risk_tier, "risk_multiplier": risk_multiplier, "exposure_multiplier": exposure_multiplier, "risk_rationale": _risk_rationale(risk_score, risk_tier, risk_flags), "exposure_rationale": _exposure_rationale(exposure_multiplier, risk_tier)}
     cbi = report.get("central_bank")
@@ -112,6 +119,7 @@ def build_decision(report: dict[str, Any], policy: RiskPolicy = DEFAULT_RISK_POL
         portfolio_input = report.get("portfolio") if isinstance(report.get("portfolio"), dict) else {}
         result["portfolio"] = build_capital_snapshot(capital, currency=portfolio_input.get("currency", "IRR"), source=portfolio_input.get("source", "runtime"))
         result["portfolio_risk_budget"] = portfolio_budget
+        result["portfolio_state"] = position_summary
         result["exposure_budget"] = exposure_budget
         result["sizing_rationale"] = f"capital-based advisory budget: {exposure_budget:.2f} from current capital {capital:.2f} at {exposure_multiplier:.0%} exposure; ratios remain unchanged as capital changes; no trade is executed."
     if position_size is not None:
