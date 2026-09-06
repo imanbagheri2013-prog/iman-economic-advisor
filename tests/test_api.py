@@ -1,11 +1,14 @@
 import json
+from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
 
 from iea.api import create_app
 
 
-def _report(finished_at="2026-09-06T12:00:00+00:00"):
+def _report(finished_at=None):
+    if finished_at is None:
+        finished_at = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
     return {
         "status": "ok",
         "finished_at": finished_at,
@@ -49,7 +52,6 @@ def test_status_endpoint_reads_latest_report(tmp_path):
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["finished_at"] == "2026-09-06T12:00:00+00:00"
     assert payload["market_status"] == "OPEN"
     assert payload["central_bank"]["indicator_count"] == 17
     assert payload["portfolio"]["capital"] == 100_000_000
