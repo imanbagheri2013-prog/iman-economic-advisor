@@ -58,7 +58,7 @@ def create_app(report_path: str | None = None) -> Any:
     """Create the HTTP API backed by the scheduler's latest trusted report."""
     resolved_report_path = report_path or os.getenv("IEA_REPORT_PATH", "health_report.json")
     try:
-        from fastapi import FastAPI, HTTPException
+        from fastapi import FastAPI, HTTPException, Header
     except ImportError as exc:  # pragma: no cover
         raise RuntimeError("FastAPI is required for the IEA API") from exc
 
@@ -67,6 +67,27 @@ def create_app(report_path: str | None = None) -> Any:
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok", "service": "iea-assistant"}
+
+    @app.post("/internal/report")
+    def ingest_report(payload: dict[str, Any], authorization: str | None = Header(default=None)) -> dict[str, Any]:
+        expected = os.getenv("IEA_REPORT_SINK_TOKEN")
+        if not expected:
+            raise HTTPException(status_code=503, detail="Report ingestion is not configured")
+        if authorization != f"Bearer {expected}":
+            raise HTTPException(status_code=401, detail="Unauthorized")
+        if not isinstance(payload, dict) or not payload.get("finished_at"):
+            raise HTTPException(status_code=400, detail="Invalid trusted report")
+        try:
+            from pathlib import Path
+            target = Path(resolved_report_path)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            temp = target.with_suffix(target.suffix + ".tmp")
+            import json
+            temp.write_text(json.dumps(payload, default=str, ensure_ascii=False, indent=2), encoding="utf-8")
+            temp.replace(target)
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail=f"Unable to persist trusted report: {exc}") from exc
+        return {"status": "accepted", "finished_at": payload["finished_at"]}
 
     @app.get("/ready")
     def ready() -> dict[str, Any]:
