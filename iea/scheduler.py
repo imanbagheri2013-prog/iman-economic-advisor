@@ -34,6 +34,22 @@ def _save_report(payload: dict) -> None:
     REPORT_PATH.write_text(json.dumps(payload, default=str, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _publish_report(payload: dict) -> None:
+    url = os.getenv("IEA_REPORT_SINK_URL")
+    token = os.getenv("IEA_REPORT_SINK_TOKEN")
+    if not url:
+        return
+    if not token:
+        raise RuntimeError("IEA_REPORT_SINK_TOKEN is required when IEA_REPORT_SINK_URL is configured")
+    response = requests.post(
+        url,
+        json=payload,
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=20,
+    )
+    response.raise_for_status()
+
+
 def _save_market_state(intelligence: dict) -> None:
     MARKET_STATE_PATH.write_text(
         json.dumps(intelligence, default=str, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -306,6 +322,7 @@ def run() -> int:
         if equity_cycle is not None:
             payload["advisor"] = equity_cycle
         _save_report(payload)
+        _publish_report(payload)
         print(json.dumps(payload, default=str, ensure_ascii=False, indent=2))
         return exit_code
     except Exception as exc:
@@ -317,6 +334,10 @@ def run() -> int:
             "error": str(exc),
         }
         _save_report(payload)
+        try:
+            _publish_report(payload)
+        except Exception:
+            pass
         print(json.dumps(payload, ensure_ascii=False, indent=2))
         return 1
     finally:
