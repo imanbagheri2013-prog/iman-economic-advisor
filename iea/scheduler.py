@@ -21,7 +21,9 @@ from .equity_fundamentals import FundamentalSnapshot
 from .equity_sources import fetch_live_equity_input
 from .health import check_all, overall_status
 from .iran_market import IranMarketAdapter
+from .market_intelligence import analyze_snapshots
 from .pipeline import load_config, pull_and_check
+from .providers.market import YahooChartProvider, configured_symbols
 from .runtime import load_equity_payload
 
 REPORT_PATH = Path("health_report.json")
@@ -114,6 +116,44 @@ def _closed_market_intelligence(market_status: str, session_date: str) -> dict:
         "reason": "Iran cash market is not open; the previous live snapshot is stale and is not actionable",
     }
     return snapshot
+
+
+def _live_market_intelligence(market_status: str) -> dict:
+    """Fetch configured live symbols and run the normalized signal engine.
+
+    Provider failures are isolated per symbol. A missing/failed snapshot never
+    becomes an actionable signal, preserving the project's stale-data safety
+    contract while allowing the scheduler to continue collecting other data.
+    """
+    symbols = configured_symbols()
+    if not symbols:
+        return {
+            "engine": "IEA Market Intelligence",
+            "version": "1.0",
+            "status": "NOT_CONFIGURED",
+            "market_status": market_status,
+            "actionable_count": 0,
+            "signals": [],
+            "safety": {"stale_data_action": "NO_TRADE", "missing_required_data_action": "NO_TRADE"},
+        }
+
+    provider = YahooChartProvider()
+    snapshots = []
+    errors = []
+    for symbol in symbols:
+        try:
+            snapshots.append(provider.snapshot(symbol))
+        except Exception as exc:
+            errors.append({"symbol": symbol, "error_type": type(exc).__name__, "error": str(exc)})
+
+    report = analyze_snapshots(snapshots)
+    report["status"] = "OK" if snapshots else "NO_DATA"
+    report["market_status"] = market_status
+    report["requested_symbols"] = symbols
+    report["provider"] = "yahoo_chart"
+    if errors:
+        report["errors"] = errors
+    return report
 
 
 def _capital_from_environment() -> float | None:
@@ -294,6 +334,7 @@ def run() -> int:
         else:
             intelligence = _closed_market_intelligence(market_status, session_date)
 
+        live_market = _live_market_intelligence(market_status)
         equity_cycle = _build_equity_cycle(intelligence, capital)
         central_bank = _central_bank_report(store, config)
 
@@ -318,6 +359,7 @@ def run() -> int:
             "health": health_results,
             "central_bank": central_bank,
             "intelligence": intelligence,
+            "live_market_intelligence": live_market,
         }
         if equity_cycle is not None:
             payload["advisor"] = equity_cycle
