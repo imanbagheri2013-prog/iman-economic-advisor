@@ -4,6 +4,7 @@ from typing import Any
 
 from .decision import build_decision
 from .equity_analysis import EquityAnalysis
+from .live_decision import apply_live_market_overlay
 
 
 DEFAULT_EQUITY_WEIGHT = 0.40
@@ -24,11 +25,11 @@ def build_equity_market_decision(
     equity_weight: float = DEFAULT_EQUITY_WEIGHT,
     market_weight: float = DEFAULT_MARKET_WEIGHT,
 ) -> dict[str, Any]:
-    """Combine asset-level equity analysis with the eight-factor market view.
+    """Combine equity analysis with market view and apply the live safety gate.
 
     The equity layer supplies fundamental quality plus valuation; the market layer
-    supplies regime, coverage, and risk flags. The existing decision engine remains
-    the final policy gate, so this function never executes a trade.
+    supplies regime, coverage, and risk flags. If live market intelligence is
+    explicitly configured, the live overlay is the final fail-closed gate.
     """
     if equity_weight < 0 or market_weight < 0:
         raise ValueError("weights must be non-negative")
@@ -62,6 +63,11 @@ def build_equity_market_decision(
         "factors": market_report.get("factors") or [],
     }
     decision = build_decision(decision_input)
+    decision = apply_live_market_overlay(
+        decision,
+        market_report.get("live_market_intelligence"),
+        symbol=analysis.symbol,
+    )
 
     return {
         "symbol": analysis.symbol,
