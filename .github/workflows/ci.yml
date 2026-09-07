@@ -26,3 +26,5 @@ jobs:
 
       - name: Run tests
         run: pytest -q
+
+# Verification rerun: keep the CI workflow itself unchanged in behavior.
