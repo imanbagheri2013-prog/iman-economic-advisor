@@ -4,6 +4,7 @@ from typing import Any, Iterable
 
 from .equity_analysis import FundamentalSnapshot, analyze_equity, equity_analysis_summary
 from .equity_decision import build_equity_market_decision
+from .live_decision import apply_live_market_overlay
 
 
 def build_equity_advisor_report(
@@ -19,12 +20,13 @@ def build_equity_advisor_report(
     methods_used: Iterable[str] = ("weighted_valuation",),
     equity_weight: float = 0.40,
     market_weight: float = 0.60,
+    live_market_intelligence: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the end-to-end equity advisory report.
 
-    This is the application-level orchestration layer: it runs the asset-level
-    fundamental/valuation analysis and then feeds that result into the unified
-    equity + eight-factor market decision engine.
+    The live-market layer is an explicit final safety validation: configured
+    live data can validate the policy decision, while stale, missing, or
+    disagreeing live data fails closed to NO_TRADE.
     """
     analysis = analyze_equity(
         snapshot=snapshot,
@@ -42,6 +44,11 @@ def build_equity_advisor_report(
         equity_weight=equity_weight,
         market_weight=market_weight,
     )
+    decision = apply_live_market_overlay(
+        unified["decision"],
+        live_market_intelligence,
+        symbol=analysis.symbol,
+    )
 
     return {
         "engine": "iea_equity_advisor_v1",
@@ -52,10 +59,11 @@ def build_equity_advisor_report(
             "coverage": unified["coverage"],
             "regime": unified["regime"],
         },
-        "decision": unified["decision"],
+        "decision": decision,
         "combined_score": unified["combined_score"],
         "weights": {
             "equity": unified["equity_weight"],
             "market": unified["market_weight"],
         },
+        "live_market": live_market_intelligence,
     }
