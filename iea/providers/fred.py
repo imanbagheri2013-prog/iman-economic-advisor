@@ -18,11 +18,11 @@ RETRY_DELAYS_SECONDS = (2, 5)
 class FRED:
     def __init__(self, api_key=None):
         self.api_key = api_key or os.getenv("FRED_API_KEY")
+        if not self.api_key:
+            raise RuntimeError("FRED_API_KEY is not set")
 
     def observations(self, series_id, limit=100):
-        if self.api_key:
-            return self._api_observations(series_id, limit)
-        return self._public_csv_observations(series_id, limit)
+        return self._api_observations(series_id, limit)
 
     def _api_observations(self, series_id, limit):
         params = {
