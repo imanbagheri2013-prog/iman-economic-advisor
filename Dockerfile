@@ -4,6 +4,7 @@ WORKDIR /app
 
 COPY requirements.txt pyproject.toml ./
 COPY iea ./iea
+COPY config ./config
 
 RUN python -m pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r requirements.txt \
@@ -14,9 +15,7 @@ ENV IEA_API_HOST=0.0.0.0
 ENV IEA_API_PORT=8000
 ENV IEA_REPORT_PATH=/data/health_report.json
 
-RUN mkdir -p /data && chown -R iea:iea /app /data
-
-USER iea
+RUN mkdir -p /data && chmod 0777 /data && chown -R iea:iea /app /data
 
 EXPOSE 8000
 
