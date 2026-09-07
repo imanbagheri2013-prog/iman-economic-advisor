@@ -1,11 +1,14 @@
 import json
+from datetime import datetime, timezone
 
 import pytest
 
 from iea.report_service import load_latest_report
 
 
-def _report(timestamp="2026-09-06T12:00:00+00:00"):
+def _report(timestamp=None):
+    if timestamp is None:
+        timestamp = datetime.now(timezone.utc).isoformat()
     return {
         "status": "ok",
         "finished_at": timestamp,
