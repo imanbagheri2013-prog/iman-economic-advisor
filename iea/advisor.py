@@ -5,6 +5,29 @@ from typing import Any, Iterable
 from .equity_analysis import FundamentalSnapshot, analyze_equity, equity_analysis_summary
 from .equity_decision import build_equity_market_decision
 from .live_decision import apply_live_market_overlay
+from .market_intelligence import analyze_snapshots
+from .providers.market import YahooChartProvider, configured_symbols
+
+
+def _configured_live_market_intelligence() -> dict[str, Any] | None:
+    symbols = configured_symbols()
+    if not symbols:
+        return None
+    provider = YahooChartProvider()
+    snapshots = []
+    errors = []
+    for symbol in symbols:
+        try:
+            snapshots.append(provider.snapshot(symbol))
+        except Exception as exc:
+            errors.append({"symbol": symbol, "error_type": type(exc).__name__, "error": str(exc)})
+    report = analyze_snapshots(snapshots)
+    report["status"] = "OK" if snapshots else "NO_DATA"
+    report["requested_symbols"] = symbols
+    report["provider"] = "yahoo_chart"
+    if errors:
+        report["errors"] = errors
+    return report
 
 
 def build_equity_advisor_report(
@@ -24,9 +47,9 @@ def build_equity_advisor_report(
 ) -> dict[str, Any]:
     """Build the end-to-end equity advisory report.
 
-    The live-market layer is an explicit final safety validation: configured
-    live data can validate the policy decision, while stale, missing, or
-    disagreeing live data fails closed to NO_TRADE.
+    Configured live market data is automatically used when an explicit report
+    is not supplied. Stale, missing, or disagreeing live data fails closed to
+    NO_TRADE through the live decision overlay.
     """
     analysis = analyze_equity(
         snapshot=snapshot,
@@ -44,9 +67,12 @@ def build_equity_advisor_report(
         equity_weight=equity_weight,
         market_weight=market_weight,
     )
+    live_report = live_market_intelligence
+    if live_report is None:
+        live_report = _configured_live_market_intelligence()
     decision = apply_live_market_overlay(
         unified["decision"],
-        live_market_intelligence,
+        live_report,
         symbol=analysis.symbol,
     )
 
@@ -65,5 +91,5 @@ def build_equity_advisor_report(
             "equity": unified["equity_weight"],
             "market": unified["market_weight"],
         },
-        "live_market": live_market_intelligence,
+        "live_market": live_report,
     }
