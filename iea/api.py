@@ -8,6 +8,7 @@ from .assistant_runtime import answer, load_report
 
 def _status_payload(report: dict[str, Any]) -> dict[str, Any]:
     intelligence = report.get("intelligence") or {}
+    live_market = report.get("live_market_intelligence") or {}
     central_bank = report.get("central_bank") or {}
     portfolio = report.get("portfolio") or {}
     meta = report.get("report_meta") or {}
@@ -28,6 +29,14 @@ def _status_payload(report: dict[str, Any]) -> dict[str, Any]:
         "market_regime": intelligence.get("regime"),
         "market_score": intelligence.get("score"),
         "data_quality": intelligence.get("data_quality"),
+        "live_market": {
+            "status": live_market.get("status", "NOT_CONFIGURED"),
+            "provider": live_market.get("provider"),
+            "requested_symbols": live_market.get("requested_symbols", []),
+            "actionable_count": live_market.get("actionable_count", 0),
+            "signals": live_market.get("signals", []),
+            "errors": live_market.get("errors", []),
+        },
         "central_bank": {
             "ingestion_status": central_bank.get("ingestion_status"),
             "indicator_count": central_bank.get("indicator_count"),
