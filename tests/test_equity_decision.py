@@ -92,6 +92,96 @@ def test_weights_are_normalized():
     assert result["market_weight"] == pytest.approx(0.6)
 
 
+def test_live_same_side_signal_validates_equity_decision():
+    result = build_equity_market_decision(
+        equity_analysis(),
+        {
+            "score": 70,
+            "coverage": 1.0,
+            "factors": [],
+            "live_market_intelligence": {
+                "status": "OK",
+                "signals": [
+                    {"symbol": "TEST", "action": "BUY", "data_fresh": True}
+                ],
+            },
+        },
+    )
+    assert result["decision"]["action"] == "BUY_BIAS"
+    assert result["decision"]["live_market_validated"] is True
+    assert result["decision"]["live_market_signal"] == "BUY"
+
+
+def test_live_disagreement_blocks_equity_decision():
+    result = build_equity_market_decision(
+        equity_analysis(),
+        {
+            "score": 70,
+            "coverage": 1.0,
+            "factors": [],
+            "live_market_intelligence": {
+                "status": "OK",
+                "signals": [
+                    {"symbol": "TEST", "action": "SELL", "data_fresh": True}
+                ],
+            },
+        },
+    )
+    assert result["decision"]["action"] == "NO_TRADE"
+    assert "live_market_signal_disagrees" in result["decision"]["risk_flags"]
+
+
+def test_live_stale_signal_blocks_equity_decision():
+    result = build_equity_market_decision(
+        equity_analysis(),
+        {
+            "score": 70,
+            "coverage": 1.0,
+            "factors": [],
+            "live_market_intelligence": {
+                "status": "OK",
+                "signals": [
+                    {"symbol": "TEST", "action": "BUY", "data_fresh": False}
+                ],
+            },
+        },
+    )
+    assert result["decision"]["action"] == "NO_TRADE"
+    assert "live_market_data_stale" in result["decision"]["risk_flags"]
+
+
+def test_live_non_actionable_signal_blocks_equity_decision():
+    result = build_equity_market_decision(
+        equity_analysis(),
+        {
+            "score": 70,
+            "coverage": 1.0,
+            "factors": [],
+            "live_market_intelligence": {
+                "status": "OK",
+                "signals": [
+                    {"symbol": "TEST", "action": "WAIT", "data_fresh": True}
+                ],
+            },
+        },
+    )
+    assert result["decision"]["action"] == "NO_TRADE"
+    assert "live_market_signal_not_actionable" in result["decision"]["risk_flags"]
+
+
+def test_live_market_not_configured_preserves_existing_decision():
+    result = build_equity_market_decision(
+        equity_analysis(),
+        {
+            "score": 70,
+            "coverage": 1.0,
+            "factors": [],
+            "live_market_intelligence": {"status": "NOT_CONFIGURED"},
+        },
+    )
+    assert result["decision"]["action"] == "BUY_BIAS"
+
+
 def test_end_to_end_equity_advisor_report_contains_all_layers():
     result = build_equity_advisor_report(
         snapshot=snapshot(),
