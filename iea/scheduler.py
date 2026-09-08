@@ -42,6 +42,12 @@ def _publish_report(payload: dict) -> None:
         return
     if not token:
         raise RuntimeError("IEA_REPORT_SINK_TOKEN is required when IEA_REPORT_SINK_URL is configured")
+    # Railway commonly supplies an internal service domain without a scheme.
+    # requests requires an absolute URL, so normalize the configured sink while
+    # preserving explicit http/https configuration.
+    url = url.strip()
+    if not url.lower().startswith(("http://", "https://")):
+        url = f"https://{url}"
     response = requests.post(url, json=payload, headers={"Authorization": f"Bearer {token}"}, timeout=20)
     response.raise_for_status()
 
