@@ -6,11 +6,14 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlencode
 
 import requests
 
 CDN_MARKETWATCH_URL = "https://cdn.tsetmc.com/api/ClosingPrice/GetMarketWatch"
+CDN_PROXY_BASE = "https://r.jina.ai/http://cdn.tsetmc.com/api/ClosingPrice/GetMarketWatch"
 LEGACY_MARKETWATCH_URL = "https://old.tsetmc.com/tsev2/data/MarketWatchPlus.aspx"
+LEGACY_PROXY_URL = "https://r.jina.ai/http://old.tsetmc.com/tsev2/data/MarketWatchPlus.aspx"
 SYMBOLS = ["فولاد", "فملی", "شستا", "خودرو", "وبملت"]
 
 HEADERS = {
@@ -54,42 +57,44 @@ def normalize_symbol(value: Any) -> str:
     return str(value or "").strip().replace("\u200c", "")
 
 
+def parse_cdn_payload(text: str) -> dict[str, dict[str, Any]]:
+    payload = json.loads(text.lstrip("\ufeff"))
+    rows = payload.get("marketwatch") if isinstance(payload, dict) else payload
+    if not isinstance(rows, list) or not rows:
+        raise RuntimeError("TSETMC CDN marketwatch response contains no rows")
+    parsed: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        symbol = normalize_symbol(row.get("l18") or row.get("lVal18AFC") or row.get("symbol") or row.get("ticker"))
+        if symbol:
+            parsed[symbol] = row
+    if not parsed:
+        raise RuntimeError("TSETMC CDN marketwatch returned no named instruments")
+    return parsed
+
+
 def fetch_cdn_marketwatch() -> tuple[dict[str, dict[str, Any]], str]:
-    last_error: Exception | None = None
-    for attempt in range(3):
-        try:
-            response = requests.get(
-                CDN_MARKETWATCH_URL,
-                params=CDN_PARAMS,
-                headers=HEADERS,
-                timeout=(10, 30),
-            )
-            response.raise_for_status()
-            payload = response.json()
-            rows = payload.get("marketwatch") if isinstance(payload, dict) else payload
-            if not isinstance(rows, list) or not rows:
-                raise RuntimeError("TSETMC CDN marketwatch response contains no rows")
-            parsed: dict[str, dict[str, Any]] = {}
-            for row in rows:
-                if not isinstance(row, dict):
-                    continue
-                symbol = normalize_symbol(row.get("l18") or row.get("lVal18AFC") or row.get("symbol") or row.get("ticker"))
-                if symbol:
-                    parsed[symbol] = row
-            if not parsed:
-                raise RuntimeError("TSETMC CDN marketwatch returned no named instruments")
-            return parsed, CDN_MARKETWATCH_URL
-        except (requests.RequestException, ValueError, RuntimeError) as exc:
-            last_error = exc
-            if attempt < 2:
-                time.sleep(2 ** attempt)
-    raise RuntimeError(f"TSETMC CDN marketwatch failed: {last_error}")
+    query = urlencode(CDN_PARAMS)
+    targets = [
+        (f"{CDN_PROXY_BASE}?{query}", "tsetmc-cdn-via-jina-proxy"),
+        (f"{CDN_MARKETWATCH_URL}?{query}", "tsetmc-cdn-direct"),
+    ]
+    failures: list[str] = []
+    for url, source in targets:
+        for attempt in range(2):
+            try:
+                response = requests.get(url, headers=HEADERS, timeout=(10, 25))
+                response.raise_for_status()
+                return parse_cdn_payload(response.text), source
+            except (requests.RequestException, ValueError, RuntimeError) as exc:
+                failures.append(f"{source}/{type(exc).__name__}: {exc}")
+                if attempt == 0:
+                    time.sleep(2)
+    raise RuntimeError("TSETMC CDN collector failed: " + " | ".join(failures))
 
 
-def fetch_legacy_marketwatch() -> tuple[dict[str, dict[str, Any]], str]:
-    response = requests.get(LEGACY_MARKETWATCH_URL, headers=HEADERS, timeout=(10, 20))
-    response.raise_for_status()
-    text = response.content.decode("utf-8-sig", errors="ignore")
+def parse_legacy_payload(text: str) -> dict[str, dict[str, Any]]:
     parts = text.split("@")
     if len(parts) < 3:
         raise RuntimeError("legacy MarketWatch response has no quote section")
@@ -98,10 +103,29 @@ def fetch_legacy_marketwatch() -> tuple[dict[str, dict[str, Any]], str]:
         fields = raw.split(",")
         if len(fields) >= 14 and fields[2].strip():
             symbol = fields[2].strip()
-            rows[symbol] = {"l18": symbol, "pc": fields[6], "py": fields[13], "tvol": fields[9], "pmin": fields[11], "pmax": fields[12]}
+            rows[symbol] = {
+                "l18": symbol,
+                "pc": fields[6],
+                "py": fields[13],
+                "tvol": fields[9],
+                "pmin": fields[11],
+                "pmax": fields[12],
+            }
     if not rows:
         raise RuntimeError("legacy MarketWatch returned no instrument rows")
-    return rows, LEGACY_MARKETWATCH_URL
+    return rows
+
+
+def fetch_legacy_marketwatch() -> tuple[dict[str, dict[str, Any]], str]:
+    failures: list[str] = []
+    for url, source in ((LEGACY_PROXY_URL, "tsetmc-legacy-via-jina-proxy"), (LEGACY_MARKETWATCH_URL, "tsetmc-legacy-direct")):
+        try:
+            response = requests.get(url, headers=HEADERS, timeout=(10, 25))
+            response.raise_for_status()
+            return parse_legacy_payload(response.text), source
+        except (requests.RequestException, RuntimeError) as exc:
+            failures.append(f"{source}/{type(exc).__name__}: {exc}")
+    raise RuntimeError("legacy TSETMC collector failed: " + " | ".join(failures))
 
 
 def fetch_marketwatch() -> tuple[dict[str, dict[str, Any]], str]:
@@ -122,7 +146,7 @@ def main() -> None:
     output = Path("data/iran_market_live.json")
     output.parent.mkdir(parents=True, exist_ok=True)
     requested = [x.strip() for x in os.getenv("IEA_IR_SYMBOLS", ",".join(SYMBOLS)).split(",") if x.strip()]
-    rows, source_url = fetch_marketwatch()
+    rows, source = fetch_marketwatch()
     symbols: dict[str, dict[str, Any]] = {}
     errors: dict[str, str] = {}
     generated_at = datetime.now(timezone.utc).isoformat()
@@ -162,7 +186,7 @@ def main() -> None:
 
     payload = {
         "generated_at": generated_at,
-        "source": f"tsetmc-cdn-marketwatch-via-github-actions:{source_url}",
+        "source": f"{source}:github-actions",
         "market_status": "LIVE_OR_CLOSED_FROM_TSETMC_FEED",
         "symbols": symbols,
         "errors": errors,
