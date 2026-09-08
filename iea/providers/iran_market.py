@@ -8,6 +8,7 @@ from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 import requests
+import urllib3.util.connection as urllib3_connection
 
 from ..market_intelligence import MarketSnapshot
 
@@ -20,24 +21,39 @@ RETRY_DELAYS_SECONDS = (1, 3)
 class IranMarketProvider:
     """TSETMC adapter for quote, history, flow, shareholders and Codal metadata."""
 
-    def __init__(self, base_url: str | None = None, timeout: float = 15.0):
+    def __init__(self, base_url: str | None = None, timeout: float = 20.0):
         self.base_url = (base_url or os.getenv("IEA_IRAN_MARKET_DATA_URL", BASE_URL)).rstrip("/")
         self.timeout = timeout
         self.session = requests.Session()
-        self.session.headers.update({"User-Agent": "Mozilla/5.0 IEA/1.0"})
+        self.session.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126 Safari/537.36",
+            "Accept": "application/json,text/plain,*/*",
+            "Referer": "https://www.tsetmc.com/",
+            "Origin": "https://www.tsetmc.com",
+        })
+        # Railway can resolve cdn.tsetmc.com to IPv6 first while its outbound
+        # IPv6 route is unreliable. urllib3 otherwise waits for the IPv6
+        # connect timeout before trying IPv4. Force IPv4 for this provider.
+        if self.base_url.lower().startswith("https://cdn.tsetmc.com"):
+            urllib3_connection.HAS_IPV6 = False
 
     def _get(self, path: str) -> dict[str, Any]:
         response = None
+        last_error: requests.RequestException | None = None
         for attempt in range(1, MAX_ATTEMPTS + 1):
             try:
                 response = self.session.get(f"{self.base_url}/{path.lstrip('/')}", timeout=self.timeout)
                 if response.status_code not in {429, 500, 502, 503, 504} or attempt == MAX_ATTEMPTS:
                     break
-            except requests.RequestException:
+            except requests.RequestException as exc:
+                last_error = exc
                 if attempt == MAX_ATTEMPTS:
                     raise
             time.sleep(RETRY_DELAYS_SECONDS[attempt - 1])
-        assert response is not None
+        if response is None:
+            if last_error is not None:
+                raise last_error
+            raise RuntimeError("TSETMC request produced no response")
         response.raise_for_status()
         payload = response.json()
         if not isinstance(payload, dict):
