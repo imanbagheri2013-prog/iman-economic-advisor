@@ -5,15 +5,13 @@ from typing import Any
 
 from .assistant_runtime import answer, load_report
 from .canslim import CanSlimInput, analyze_canslim
+from .fundamentals import parse_financials
 from .providers.iran_market import IranMarketProvider
 
 
 def _status_payload(report: dict[str, Any]) -> dict[str, Any]:
-    intelligence = report.get("intelligence") or {}
-    live_market = report.get("live_market_intelligence") or {}
-    central_bank = report.get("central_bank") or {}
-    portfolio = report.get("portfolio") or {}
-    meta = report.get("report_meta") or {}
+    intelligence = report.get("intelligence") or {}; live_market = report.get("live_market_intelligence") or {}
+    central_bank = report.get("central_bank") or {}; portfolio = report.get("portfolio") or {}; meta = report.get("report_meta") or {}
     return {"service": "iea-assistant", "status": report.get("status", "unknown"), "pipeline_status": report.get("pipeline_status"),
         "finished_at": report.get("finished_at"), "health_status": report.get("health_status"),
         "report": {"fresh": meta.get("fresh"), "age_seconds": meta.get("age_seconds"), "max_age_seconds": meta.get("max_age_seconds"), "path": meta.get("path")},
@@ -25,10 +23,8 @@ def _status_payload(report: dict[str, Any]) -> dict[str, Any]:
 
 
 def _load_fresh_report(report_path: str) -> dict[str, Any]:
-    report = load_report(report_path)
-    meta = report.get("report_meta") or {}
-    if meta.get("fresh") is not True:
-        raise RuntimeError("IEA trusted report is stale; refresh the scheduler before requesting an answer")
+    report = load_report(report_path); meta = report.get("report_meta") or {}
+    if meta.get("fresh") is not True: raise RuntimeError("IEA trusted report is stale; refresh the scheduler before requesting an answer")
     return report
 
 
@@ -44,9 +40,8 @@ def create_app(report_path: str | None = None) -> Any:
     resolved_report_path = report_path or os.getenv("IEA_REPORT_PATH", "health_report.json")
     try:
         from fastapi import FastAPI, HTTPException, Header
-    except ImportError as exc:
-        raise RuntimeError("FastAPI is required for the IEA API") from exc
-    app = FastAPI(title="IEA Assistant API", version="1.6.0")
+    except ImportError as exc: raise RuntimeError("FastAPI is required for the IEA API") from exc
+    app = FastAPI(title="IEA Assistant API", version="1.7.0")
 
     @app.get("/health")
     def health() -> dict[str, str]: return {"status": "ok", "service": "iea-assistant"}
@@ -78,32 +73,35 @@ def create_app(report_path: str | None = None) -> Any:
 
     @app.get("/stock/canslim")
     def stock_canslim(symbol: str) -> dict[str, Any]:
-        """Professional stock review with explicit data provenance and missing-data policy."""
+        """Professional stock review: market, flows, holders, Codal statements and CAN SLIM."""
         try:
             data = IranMarketProvider().research_data(symbol, days=23)
             instrument = data.get("instrument_info") or {}; one = data.get("one_month") or {}; flow = data.get("money_flow") or {}
             holder = data.get("major_shareholder_change") or {}; daily = data.get("daily") or []; current = daily[0] if daily else {}
             price = _first_number(current.get("pClosing"), current.get("pDrCotVal")); high = _first_number(current.get("priceMax")); low = _first_number(current.get("priceMin"))
             near_high = None if price is None or high is None or low is None or high <= low else price >= low + .8 * (high - low)
+            fundamentals = parse_financials(data.get("codal_filings") or [])
+            ratios = fundamentals["ratios"]; values = fundamentals["values"]
             analysis = analyze_canslim(symbol=data["symbol"], data=CanSlimInput(
                 price_near_high=near_high, one_month_return_pct=one.get("return_pct"), one_month_high=one.get("high"), one_month_low=one.get("low"),
                 one_month_avg_volume=one.get("avg_volume"), volume_trend_pct=one.get("volume_trend_pct"), net_real_money=flow.get("real_net_value"), net_legal_money=flow.get("legal_net_value"),
                 major_shareholder_change_pct=_first_number(holder.get("entries", [{}])[0].get("change") if holder.get("entries") else None),
                 pe=_first_number(instrument.get("pe"), instrument.get("pE")), pb=_first_number(instrument.get("pb"), instrument.get("pB")),
                 ps=_first_number(instrument.get("ps"), instrument.get("pS")), market_cap=_first_number(instrument.get("marketValue"), instrument.get("marketCap")),
-                sector_pe=_first_number(instrument.get("sectorPE"), instrument.get("sectorPe"))))
+                sector_pe=_first_number(instrument.get("sectorPE"), instrument.get("sectorPe")), revenue_growth_pct=fundamentals["growth"]["revenue_growth_pct"],
+                gross_margin_pct=ratios["gross_margin_pct"], operating_margin_pct=ratios["operating_margin_pct"], net_margin_pct=ratios["net_margin_pct"],
+                free_cash_flow=ratios["free_cash_flow"], operating_cash_flow=values["operating_cash_flow"], debt_to_equity=ratios["debt_to_equity"],
+                current_ratio=ratios["current_ratio"], roe_pct=ratios["roe_pct"], roic_pct=ratios["roic_pct"],
+                current_eps_growth_pct=fundamentals["growth"]["eps_growth_pct"], annual_eps_growth_pct=None))
             analysis["market_data"] = {"provider": "tsetmc", "data_date": data.get("data_date"), "price": price, "market_status": "CLOSED"}
             analysis["one_month_behavior"] = data.get("one_month"); analysis["money_flow"] = flow
             analysis["major_shareholders"] = data.get("major_shareholders"); analysis["major_shareholder_change"] = holder
             analysis["capital_and_share_changes"] = data.get("share_changes")
-            analysis["codal_filings"] = {"count": len(data.get("codal_filings") or []), "items": data.get("codal_filings") or [],
-                "statement_parser": "PENDING", "note": "Codal filing metadata is ingested; statement-line parsing is the next fundamental layer and values are not guessed."}
-            analysis["financial_statements"] = {"status": "CODAL_METADATA_READY", "required": [
-                "income_statement", "balance_sheet", "cash_flow_statement", "quarterly_revenue_and_eps", "gross_margin", "operating_margin", "net_margin",
-                "roe", "roic", "debt_to_equity", "free_cash_flow", "working_capital", "receivables", "inventory", "capex", "dividend_history", "earnings_quality"],
-                "policy": "Only verified Codal statement values may affect the fundamental score."}
+            analysis["codal_filings"] = {"count": len(data.get("codal_filings") or []), "items": data.get("codal_filings") or [], "statement_parser": fundamentals["status"]}
+            analysis["financial_statements"] = fundamentals
             analysis["data_quality"] = {"tsetmc_market": True, "one_month_history": bool(data.get("daily")), "money_flow_history": bool(data.get("client_type_history")),
-                "major_shareholders": bool(data.get("major_shareholders")), "codal_metadata": bool(data.get("codal_filings")), "fundamental_statement_values": False}
+                "major_shareholders": bool(data.get("major_shareholders")), "codal_metadata": bool(data.get("codal_filings")),
+                "fundamental_statement_values": fundamentals["status"] == "READY"}
             return analysis
         except (RuntimeError, ValueError, OSError, KeyError) as exc: raise HTTPException(status_code=502, detail=str(exc)) from exc
 
