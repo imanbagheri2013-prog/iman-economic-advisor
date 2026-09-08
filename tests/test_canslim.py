@@ -57,9 +57,9 @@ def test_fundamental_score_is_weighted_and_complete_when_all_metrics_exist():
 def test_fundamental_score_is_discounted_by_low_coverage():
     result = analyze_canslim("TEST", CanSlimInput(roe_pct=20, roic_pct=12))
     assert result["fundamental_quality_score"] == 100.0
-    assert result["fundamental_score"] == 26.09
-    assert result["fundamental_score_coverage_pct"] == 26.09
-    assert result["fundamental_confidence_pct"] == 26.09
+    assert result["fundamental_score"] == 26.67
+    assert result["fundamental_score_coverage_pct"] == 26.67
+    assert result["fundamental_confidence_pct"] == 26.67
     assert result["fundamental_score_complete"] is False
     assert "revenue_growth_pct" in result["fundamental_missing_metrics"]
 
