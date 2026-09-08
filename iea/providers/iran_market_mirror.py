@@ -9,6 +9,7 @@ import requests
 from ..market_intelligence import MarketSnapshot
 
 DEFAULT_MIRROR_URL = "https://raw.githubusercontent.com/imanbagheri2013-prog/iman-economic-advisor/market-data/data/iran_market_live.json"
+LEGACY_MARKETWATCH_URL = "http://old.tsetmc.com/tsev2/data/MarketWatchPlus.aspx"
 
 
 class IranMarketMirrorProvider:
@@ -56,6 +57,43 @@ class IranMarketMirrorProvider:
         )
 
 
+class LegacyTsetmcMarketProvider:
+    """Use the legacy MarketWatchPlus feed as a Railway-compatible fallback."""
+
+    def __init__(self, url: str = LEGACY_MARKETWATCH_URL, timeout: float = 15.0) -> None:
+        self.url = url
+        self.timeout = timeout
+        self.session = requests.Session()
+        self.session.headers.update({"User-Agent": "Mozilla/5.0", "Accept": "text/plain,text/*,*/*"})
+
+    def snapshot(self, symbol: str) -> MarketSnapshot:
+        response = self.session.get(self.url, timeout=self.timeout)
+        response.raise_for_status()
+        text = response.content.decode("utf-8", errors="ignore")
+        parts = text.split("@")
+        if len(parts) < 3:
+            raise ValueError("legacy MarketWatchPlus response has no price section")
+        for raw in parts[2].split(";"):
+            fields = raw.split(",")
+            if len(fields) < 23:
+                continue
+            if fields[2].strip() != symbol:
+                continue
+            observed_at = datetime.now(timezone.utc)
+            data_date = observed_at.astimezone().strftime("%Y%m%d")
+            price = _number(fields[6])
+            previous = _number(fields[13])
+            if price is None:
+                raise ValueError(f"legacy closing price missing for {symbol}")
+            return MarketSnapshot(
+                symbol=symbol, observed_at=observed_at, price=price,
+                previous_close=previous, volume=_number(fields[9]),
+                high=_number(fields[12]), low=_number(fields[11]),
+                source="tsetmc-legacy-marketwatch", market_status="CLOSED", data_date=data_date,
+            )
+        raise ValueError(f"legacy MarketWatchPlus has no row for {symbol}")
+
+
 def _number(value: Any) -> float | None:
     try:
         return None if value is None else float(value)
@@ -77,7 +115,7 @@ def _epoch_from_tsetmc(data_date: str | None, h_even: Any) -> float | None:
         raw = int(h_even or 0)
         hour, minute, second = raw // 10000, (raw // 100) % 100, raw % 100
         from zoneinfo import ZoneInfo
-        from datetime import date, time
+        from datetime import time
         tehran = ZoneInfo("Asia/Tehran")
         parsed = datetime.strptime(data_date, "%Y%m%d").date()
         return datetime.combine(parsed, time(hour, minute, second), tzinfo=tehran).timestamp()
@@ -86,22 +124,19 @@ def _epoch_from_tsetmc(data_date: str | None, h_even: Any) -> float | None:
 
 
 class FallbackIranMarketProvider:
-    """Prefer the GitHub Actions mirror; fall back to direct TSETMC when unavailable."""
+    """Prefer the GitHub mirror, then legacy MarketWatch, then direct CDN TSETMC."""
 
     def __init__(self) -> None:
         from .iran_market import IranMarketProvider
         self.mirror = IranMarketMirrorProvider()
+        self.legacy = LegacyTsetmcMarketProvider()
         self.direct = IranMarketProvider()
 
     def snapshot(self, symbol: str) -> MarketSnapshot:
-        try:
-            return self.mirror.snapshot(symbol)
-        except Exception as mirror_error:
+        failures: list[str] = []
+        for name, provider in (("mirror", self.mirror), ("legacy", self.legacy), ("direct", self.direct)):
             try:
-                return self.direct.snapshot(symbol)
-            except Exception as direct_error:
-                raise RuntimeError(
-                    f"Iran market unavailable via mirror and direct TSETMC; "
-                    f"mirror={type(mirror_error).__name__}: {mirror_error}; "
-                    f"direct={type(direct_error).__name__}: {direct_error}"
-                ) from direct_error
+                return provider.snapshot(symbol)
+            except Exception as exc:
+                failures.append(f"{name}={type(exc).__name__}: {exc}")
+        raise RuntimeError("Iran market unavailable; " + " | ".join(failures))
