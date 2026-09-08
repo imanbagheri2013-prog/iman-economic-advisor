@@ -142,9 +142,11 @@ def parse_financials(payload: Any) -> dict[str, Any]:
         "revenue_growth_pct": _series_growth(periods, "revenue"),
         "eps_growth_pct": _series_growth(periods, "eps"),
         "net_income_growth_pct": _series_growth(periods, "net_income"),
+        "asset_growth_pct": _series_growth(periods, "assets"),
         "annual_revenue_growth_pct": _series_growth(annual, "revenue"),
         "annual_eps_growth_pct": _series_growth(annual, "eps"),
         "annual_net_income_growth_pct": _series_growth(annual, "net_income"),
+        "annual_asset_growth_pct": _series_growth(annual, "assets"),
     }
     ocf_to_net = None if ocf is None or net in (None, 0) else ocf / net
     fcf_margin = None if fcf is None or revenue in (None, 0) else fcf / revenue * 100
