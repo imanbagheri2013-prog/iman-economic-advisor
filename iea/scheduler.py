@@ -10,12 +10,7 @@ from pathlib import Path
 import requests
 
 from .advisor import build_equity_advisor_report
-from .central_bank import (
-    build_monetary_dashboard,
-    build_monetary_policy_index,
-    classify_monetary_impulse,
-    growth_rate,
-)
+from .central_bank import build_monetary_dashboard, build_monetary_policy_index, classify_monetary_impulse, growth_rate
 from .eight_factor import analyze_eight_factor
 from .equity_fundamentals import FundamentalSnapshot
 from .equity_sources import fetch_live_equity_input
@@ -23,6 +18,7 @@ from .health import check_all, overall_status
 from .iran_market import IranMarketAdapter
 from .market_intelligence import analyze_snapshots
 from .pipeline import load_config, pull_and_check
+from .providers.iran_market import IranMarketProvider, configured_iran_symbols
 from .providers.market import YahooChartProvider, configured_symbols
 from .runtime import load_equity_payload
 
@@ -43,19 +39,12 @@ def _publish_report(payload: dict) -> None:
         return
     if not token:
         raise RuntimeError("IEA_REPORT_SINK_TOKEN is required when IEA_REPORT_SINK_URL is configured")
-    response = requests.post(
-        url,
-        json=payload,
-        headers={"Authorization": f"Bearer {token}"},
-        timeout=20,
-    )
+    response = requests.post(url, json=payload, headers={"Authorization": f"Bearer {token}"}, timeout=20)
     response.raise_for_status()
 
 
 def _save_market_state(intelligence: dict) -> None:
-    MARKET_STATE_PATH.write_text(
-        json.dumps(intelligence, default=str, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    MARKET_STATE_PATH.write_text(json.dumps(intelligence, default=str, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def _load_market_state() -> dict | None:
@@ -65,11 +54,7 @@ def _load_market_state() -> dict | None:
         payload = json.loads(MARKET_STATE_PATH.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
-    if not isinstance(payload, dict):
-        return None
-    if payload.get("market_region") != "IRAN":
-        return None
-    if payload.get("data_mode") != "LIVE_MARKET":
+    if not isinstance(payload, dict) or payload.get("market_region") != "IRAN" or payload.get("data_mode") != "LIVE_MARKET":
         return None
     if payload.get("stale") is True:
         return None
@@ -87,21 +72,12 @@ def _closed_market_intelligence(market_status: str, session_date: str) -> dict:
     previous = _load_market_state()
     if previous is None:
         return {
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-            "engine": "IEA",
-            "symbol": "IRAN_MARKET",
-            "market_region": "IRAN",
-            "market_status": market_status,
-            "session_date": session_date,
-            "data_mode": "NO_LIVE_MARKET_DATA",
-            "stale": True,
-            "score": None,
-            "coverage": 0.0,
-            "regime": "NEUTRAL",
-            "decision": {"action": "NO_TRADE", "reason": "Iran cash market is not open and no prior live snapshot is available"},
+            "generated_at": datetime.now(timezone.utc).isoformat(), "engine": "IEA", "symbol": "IRAN_MARKET",
+            "market_region": "IRAN", "market_status": market_status, "session_date": session_date,
+            "data_mode": "NO_LIVE_MARKET_DATA", "stale": True, "score": None, "coverage": 0.0,
+            "regime": "NEUTRAL", "decision": {"action": "NO_TRADE", "reason": "Iran cash market is not open and no prior live snapshot is available"},
             "factors": [],
         }
-
     snapshot = deepcopy(previous)
     previous_decision = snapshot.get("decision")
     snapshot["market_status"] = market_status
@@ -111,35 +87,30 @@ def _closed_market_intelligence(market_status: str, session_date: str) -> dict:
     snapshot["last_valid_market_snapshot_at"] = previous.get("generated_at")
     if previous_decision is not None:
         snapshot["last_valid_decision"] = previous_decision
-    snapshot["decision"] = {
-        "action": "NO_TRADE",
-        "reason": "Iran cash market is not open; the previous live snapshot is stale and is not actionable",
-    }
+    snapshot["decision"] = {"action": "NO_TRADE", "reason": "Iran cash market is not open; the previous live snapshot is stale and is not actionable"}
     return snapshot
 
 
 def _live_market_intelligence(market_status: str) -> dict:
-    """Fetch configured live symbols and run the normalized signal engine.
+    """Fetch Iran symbols from TSETMC even after close; closed data is analysis-only."""
+    iran_symbols = configured_iran_symbols()
+    provider_name = "tsetmc"
+    if iran_symbols:
+        symbols = iran_symbols
+        provider = IranMarketProvider()
+    else:
+        symbols = configured_symbols()
+        provider = YahooChartProvider()
+        provider_name = "yahoo_chart"
 
-    Provider failures are isolated per symbol. A missing/failed snapshot never
-    becomes an actionable signal, preserving the project's stale-data safety
-    contract while allowing the scheduler to continue collecting other data.
-    """
-    symbols = configured_symbols()
     if not symbols:
         return {
-            "engine": "IEA Market Intelligence",
-            "version": "1.0",
-            "status": "NOT_CONFIGURED",
-            "market_status": market_status,
-            "actionable_count": 0,
-            "signals": [],
-            "safety": {"stale_data_action": "NO_TRADE", "missing_required_data_action": "NO_TRADE"},
+            "engine": "IEA Market Intelligence", "version": "1.1", "status": "NOT_CONFIGURED",
+            "market_status": market_status, "actionable_count": 0, "signals": [],
+            "safety": {"stale_data_action": "NO_TRADE", "closed_market_action": "NO_TRADE", "missing_required_data_action": "NO_TRADE"},
         }
 
-    provider = YahooChartProvider()
-    snapshots = []
-    errors = []
+    snapshots, errors = [], []
     for symbol in symbols:
         try:
             snapshots.append(provider.snapshot(symbol))
@@ -150,7 +121,8 @@ def _live_market_intelligence(market_status: str) -> dict:
     report["status"] = "OK" if snapshots else "NO_DATA"
     report["market_status"] = market_status
     report["requested_symbols"] = symbols
-    report["provider"] = "yahoo_chart"
+    report["provider"] = provider_name
+    report["analysis_only_when_closed"] = True
     if errors:
         report["errors"] = errors
     return report
@@ -203,25 +175,10 @@ def _build_equity_cycle(intelligence: dict, capital: float | None) -> dict | Non
         method_values = live.method_values
         method_weights = live.method_weights
         methods_used = live.methods_used
-        confidence = 0.75
-        downside = 0.20
-        upside = 0.25
-        equity_weight = 0.40
-        market_weight = 0.60
-
-    return build_equity_advisor_report(
-        snapshot=snapshot,
-        current_price=current_price,
-        method_values=method_values,
-        method_weights=method_weights,
-        market_report=intelligence,
-        confidence=confidence,
-        downside=downside,
-        upside=upside,
-        methods_used=methods_used,
-        equity_weight=equity_weight,
-        market_weight=market_weight,
-    )
+        confidence, downside, upside, equity_weight, market_weight = 0.75, 0.20, 0.25, 0.40, 0.60
+    return build_equity_advisor_report(snapshot=snapshot, current_price=current_price, method_values=method_values,
+        method_weights=method_weights, market_report=intelligence, confidence=confidence, downside=downside,
+        upside=upside, methods_used=methods_used, equity_weight=equity_weight, market_weight=market_weight)
 
 
 def _pull_with_retry():
@@ -234,19 +191,14 @@ def _pull_with_retry():
             if attempt == MAX_PULL_ATTEMPTS:
                 raise
             time.sleep(RETRY_DELAYS_SECONDS[attempt - 1])
-    raise last_error  # pragma: no cover
+    raise last_error
 
 
 def _latest_pair(observations, indicator: str):
-    rows = sorted(
-        (item for item in observations if item.indicator == indicator),
-        key=lambda item: item.observed_at,
-    )
+    rows = sorted((item for item in observations if item.indicator == indicator), key=lambda item: item.observed_at)
     if not rows:
         return None, None
-    latest = rows[-1]
-    previous = rows[-2] if len(rows) >= 2 else None
-    return latest, previous
+    return rows[-1], rows[-2] if len(rows) >= 2 else None
 
 
 def _growth(observations, indicator: str) -> float | None:
@@ -266,44 +218,19 @@ def _latest_change(observations, indicator: str) -> float | None:
 def _central_bank_report(store, config: dict) -> dict:
     observations = store.central_bank_observations()
     dashboard = build_monetary_dashboard(observations)
-
-    base_growth = _growth(observations, "monetary_base")
-    liquidity_growth = _growth(observations, "liquidity_m2")
-    credit_growth = _growth(observations, "bank_credit")
+    base_growth, liquidity_growth, credit_growth = _growth(observations, "monetary_base"), _growth(observations, "liquidity_m2"), _growth(observations, "bank_credit")
     central_bank_credit_growth = _growth(observations, "central_bank_credit_to_banks")
-    impulse = classify_monetary_impulse(
-        monetary_base_growth=base_growth,
-        liquidity_growth=liquidity_growth,
-        bank_credit_growth=credit_growth,
-    )
-    policy_index = build_monetary_policy_index(
-        monetary_base_growth=base_growth,
-        liquidity_growth=liquidity_growth,
-        bank_credit_growth=credit_growth,
-        policy_rate_change=_latest_change(observations, "policy_rate"),
-        reserve_requirement_change=_latest_change(observations, "reserve_requirement"),
-        net_open_market_operation=_latest_value(observations, "open_market_operations"),
-        central_bank_credit_growth=central_bank_credit_growth,
-    )
-    dashboard["monetary_growth"] = {
-        "monetary_base_growth": base_growth,
-        "liquidity_growth": liquidity_growth,
-        "bank_credit_growth": credit_growth,
-        "central_bank_credit_growth": central_bank_credit_growth,
-    }
-    dashboard["monetary_impulse"] = impulse
-    dashboard["monetary_policy_index"] = policy_index
-    dashboard["policy_transmission"] = {
-        "currency_in_circulation_growth": _growth(observations, "currency_in_circulation"),
-        "bank_deposits_growth": _growth(observations, "bank_deposits"),
-        "bank_reserves_growth": _growth(observations, "bank_reserves"),
-        "government_deposits_growth": _growth(observations, "government_deposits"),
-        "net_foreign_assets_growth": _growth(observations, "net_foreign_assets"),
-    }
-    if config.get("cbi_data_url"):
-        dashboard["ingestion_status"] = "CONNECTED" if observations else "NO_DATA"
-    else:
-        dashboard["ingestion_status"] = "NOT_CONFIGURED"
+    dashboard["monetary_growth"] = {"monetary_base_growth": base_growth, "liquidity_growth": liquidity_growth,
+        "bank_credit_growth": credit_growth, "central_bank_credit_growth": central_bank_credit_growth}
+    dashboard["monetary_impulse"] = classify_monetary_impulse(monetary_base_growth=base_growth, liquidity_growth=liquidity_growth, bank_credit_growth=credit_growth)
+    dashboard["monetary_policy_index"] = build_monetary_policy_index(monetary_base_growth=base_growth, liquidity_growth=liquidity_growth,
+        bank_credit_growth=credit_growth, policy_rate_change=_latest_change(observations, "policy_rate"),
+        reserve_requirement_change=_latest_change(observations, "reserve_requirement"), net_open_market_operation=_latest_value(observations, "open_market_operations"),
+        central_bank_credit_growth=central_bank_credit_growth)
+    dashboard["policy_transmission"] = {"currency_in_circulation_growth": _growth(observations, "currency_in_circulation"),
+        "bank_deposits_growth": _growth(observations, "bank_deposits"), "bank_reserves_growth": _growth(observations, "bank_reserves"),
+        "government_deposits_growth": _growth(observations, "government_deposits"), "net_foreign_assets_growth": _growth(observations, "net_foreign_assets")}
+    dashboard["ingestion_status"] = "CONNECTED" if config.get("cbi_data_url") and observations else ("NOT_CONFIGURED" if not config.get("cbi_data_url") else "NO_DATA")
     dashboard["stored_observation_count"] = store.count_central_bank()
     return dashboard
 
@@ -319,48 +246,31 @@ def run() -> int:
     try:
         config = load_config()
         store, freshness_results, pipeline_status = _pull_with_retry()
-        health_results = check_all(store)
+        health_results, health_status = check_all(store), None
         health_status = overall_status(health_results)
         capital = _capital_from_environment()
         market_status, session_date = _market_context()
-
         if market_status == "OPEN":
             intelligence = analyze_eight_factor(store, capital=capital)
-            intelligence["market_status"] = market_status
-            intelligence["session_date"] = session_date
-            intelligence["data_mode"] = "LIVE_MARKET"
-            intelligence["stale"] = False
+            intelligence.update({"market_status": market_status, "session_date": session_date, "data_mode": "LIVE_MARKET", "stale": False})
             _save_market_state(intelligence)
         else:
             intelligence = _closed_market_intelligence(market_status, session_date)
-
         live_market = _live_market_intelligence(market_status)
         equity_cycle = _build_equity_cycle(intelligence, capital)
         central_bank = _central_bank_report(store, config)
-
         if pipeline_status != "OK":
             status, exit_code = "error", 1
         elif health_status == "HEALTHY":
             status, exit_code = "ok", 0
         else:
             status, exit_code = "warning", 0
-
-        payload = {
-            "started_at": started,
-            "finished_at": datetime.now(timezone.utc).isoformat(),
-            "status": status,
-            "pipeline_status": pipeline_status,
-            "health_status": health_status,
-            "observations": store.count(),
-            "central_bank_observations": store.count_central_bank(),
-            "database": str(store.path),
-            "market_session": {"status": market_status, "date": session_date},
-            "freshness": freshness_results,
-            "health": health_results,
-            "central_bank": central_bank,
-            "intelligence": intelligence,
-            "live_market_intelligence": live_market,
-        }
+        payload = {"started_at": started, "finished_at": datetime.now(timezone.utc).isoformat(), "status": status,
+            "pipeline_status": pipeline_status, "health_status": health_status, "observations": store.count(),
+            "central_bank_observations": store.count_central_bank(), "database": str(store.path),
+            "market_session": {"status": market_status, "date": session_date}, "freshness": freshness_results,
+            "health": health_results, "central_bank": central_bank, "intelligence": intelligence,
+            "live_market_intelligence": live_market}
         if equity_cycle is not None:
             payload["advisor"] = equity_cycle
         _save_report(payload)
@@ -368,13 +278,8 @@ def run() -> int:
         print(json.dumps(payload, default=str, ensure_ascii=False, indent=2))
         return exit_code
     except Exception as exc:
-        payload = {
-            "started_at": started,
-            "finished_at": datetime.now(timezone.utc).isoformat(),
-            "status": "error",
-            "error_type": type(exc).__name__,
-            "error": str(exc),
-        }
+        payload = {"started_at": started, "finished_at": datetime.now(timezone.utc).isoformat(), "status": "error",
+            "error_type": type(exc).__name__, "error": str(exc)}
         _save_report(payload)
         try:
             _publish_report(payload)
