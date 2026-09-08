@@ -91,7 +91,7 @@ def create_app(report_path: str | None = None) -> Any:
                 sector_pe=_first_number(instrument.get("sectorPE"), instrument.get("sectorPe")), revenue_growth_pct=growth["revenue_growth_pct"],
                 gross_margin_pct=ratios["gross_margin_pct"], operating_margin_pct=ratios["operating_margin_pct"], net_margin_pct=ratios["net_margin_pct"],
                 free_cash_flow=ratios["free_cash_flow"], operating_cash_flow=values["operating_cash_flow"], debt_to_equity=ratios["debt_to_equity"],
-                current_ratio=ratios["current_ratio"], roe_pct=ratios["roe_pct"], roic_pct=ratios["roic_pct"],
+                current_ratio=ratios["current_ratio"], roe_pct=ratios["roe_pct"], roic_pct=ratios["roic_pct"], asset_growth_pct=growth["asset_growth_pct"],
                 current_eps_growth_pct=growth["eps_growth_pct"], annual_eps_growth_pct=growth["annual_eps_growth_pct"]))
             analysis["market_data"] = {"provider": "tsetmc", "data_date": data.get("data_date"), "price": price, "market_status": "CLOSED"}
             analysis["one_month_behavior"] = data.get("one_month"); analysis["money_flow"] = flow
