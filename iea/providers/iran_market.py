@@ -44,6 +44,13 @@ class IranMarketProvider:
             raise ValueError("TSETMC response is not a JSON object")
         return payload
 
+    def _get_optional(self, path: str) -> dict[str, Any]:
+        """Fetch a non-critical endpoint without breaking the core market response."""
+        try:
+            return self._get(path)
+        except (requests.RequestException, ValueError):
+            return {}
+
     def search(self, query: str) -> list[dict[str, Any]]:
         if not query or not query.strip():
             raise ValueError("Iran market symbol is required")
@@ -90,6 +97,15 @@ class IranMarketProvider:
         client_history = self._get(f"ClientType/GetClientTypeHistory/{code}").get("clientType") or []
         shareholders = self._get(f"Shareholder/GetInstrumentShareHolderLast/{code}").get("shareHolder") or []
         codal = self._get(f"Codal/GetPreparedDataByInsCode/30/{code}").get("preparedData") or []
+        # TSETMC exposes statement content separately from Codal notification metadata.
+        # Keep this endpoint optional because installations/proxies may not expose it.
+        statement_content_payload = self._get_optional(f"Codal/GetStatementContentByInsCode/{code}")
+        statement_content = (
+            statement_content_payload.get("statementContent")
+            or statement_content_payload.get("statementContents")
+            or statement_content_payload.get("data")
+            or []
+        )
         share_changes = self._get(f"Instrument/GetInstrumentShareChange/{code}").get("instrumentShareChange") or []
         daily = [r for r in daily if isinstance(r, dict)][:days]
         client_history = [r for r in client_history if isinstance(r, dict)][:days]
@@ -103,7 +119,7 @@ class IranMarketProvider:
             "symbol": str(instrument.get("lVal18AFC") or symbol).strip(), "instrument": instrument, "instrument_info": info,
             "data_date": _date_string(daily[0].get("dEven")) if daily else None, "daily": daily,
             "client_type_history": client_history, "major_shareholders": shareholders,
-            "codal_filings": codal, "share_changes": share_changes,
+            "codal_filings": codal, "statement_content": statement_content, "share_changes": share_changes,
             "one_month": {"observations": len(daily), "return_pct": ((last_price / first_price) - 1) * 100 if first_price and last_price else None,
                 "high": max(prices) if prices else None, "low": min(prices) if prices else None,
                 "avg_volume": avg_volume, "latest_volume": volumes[0] if volumes else None,
