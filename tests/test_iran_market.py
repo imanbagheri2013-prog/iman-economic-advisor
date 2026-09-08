@@ -4,6 +4,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from iea.iran_market import IranMarketAdapter, iran_factor_adapters
+from iea.providers.iran_market import IranMarketProvider
 
 TEHRAN = ZoneInfo("Asia/Tehran")
 OPEN_NOW = datetime(2026, 9, 5, 10, 0, tzinfo=TEHRAN)
@@ -86,3 +87,35 @@ def test_iran_market_snapshot_and_factors(monkeypatch):
     assert liquidity(None).status == "OK"
     assert oi(None).status == "UNAVAILABLE"
     assert funding(None).status == "UNAVAILABLE"
+
+
+def test_research_data_return_uses_newest_over_oldest(monkeypatch):
+    provider = IranMarketProvider(base_url="https://example.test")
+
+    monkeypatch.setattr(
+        provider,
+        "_ins_code",
+        lambda symbol: ({"lVal18AFC": symbol, "insCode": "123"}, "123"),
+    )
+
+    def fake_get(path):
+        if path.startswith("Instrument/GetInstrumentInfo/"):
+            return {"instrumentInfo": {}}
+        if path.startswith("ClosingPrice/GetClosingPriceDailyList/"):
+            return {"closingPriceDaily": [{"pClosing": 120}, {"pClosing": 110}, {"pClosing": 100}]}
+        if path.startswith("ClientType/GetClientTypeHistory/"):
+            return {"clientType": []}
+        if path.startswith("Shareholder/GetInstrumentShareHolderLast/"):
+            return {"shareHolder": []}
+        if path.startswith("Codal/GetPreparedDataByInsCode/"):
+            return {"preparedData": []}
+        if path.startswith("Instrument/GetInstrumentShareChange/"):
+            return {"instrumentShareChange": []}
+        raise AssertionError(path)
+
+    monkeypatch.setattr(provider, "_get", fake_get)
+    monkeypatch.setattr(provider, "_get_optional", lambda path: {})
+
+    result = provider.research_data("TEST", days=3)
+
+    assert result["one_month"]["return_pct"] == 20.0
