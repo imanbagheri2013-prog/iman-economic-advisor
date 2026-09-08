@@ -138,19 +138,17 @@ def _epoch_from_tsetmc(data_date: str | None, h_even: Any) -> float | None:
 
 
 class FallbackIranMarketProvider:
-    """Prefer the GitHub mirror, then legacy MarketWatch, then direct CDN TSETMC."""
+    """Prefer the GitHub mirror, then legacy MarketWatch; never weaken fail-closed."""
 
     def __init__(self) -> None:
-        from .iran_market import IranMarketProvider
         self.mirror = IranMarketMirrorProvider()
         self.legacy = LegacyTsetmcMarketProvider()
-        self.direct = IranMarketProvider()
 
     def snapshot(self, symbol: str) -> MarketSnapshot:
         failures: list[str] = []
-        for name, provider in (("mirror", self.mirror), ("legacy", self.legacy), ("direct", self.direct)):
+        for name, provider in (("mirror", self.mirror), ("legacy", self.legacy)):
             try:
                 return provider.snapshot(symbol)
             except Exception as exc:
                 failures.append(f"{name}={type(exc).__name__}: {exc}")
-        raise RuntimeError("Iran market unavailable; " + " | ".join(failures))
+        raise RuntimeError("Iran market unavailable via mirror and legacy TSETMC; " + " | ".join(failures))
