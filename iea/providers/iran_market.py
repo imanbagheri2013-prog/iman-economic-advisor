@@ -77,6 +77,7 @@ class IranMarketProvider:
         prices = [p for p in prices if p is not None]
         if len(prices) < 2 or prices[-1] == 0:
             return None
+        # TSETMC daily history is newest-first: return from oldest observation to newest.
         return round((prices[0] / prices[-1] - 1) * 100, 4)
 
     def snapshot(self, symbol: str) -> MarketSnapshot:
