@@ -12,14 +12,7 @@ from .providers.iran_market import IranMarketProvider
 def _status_payload(report: dict[str, Any]) -> dict[str, Any]:
     intelligence = report.get("intelligence") or {}; live_market = report.get("live_market_intelligence") or {}
     central_bank = report.get("central_bank") or {}; portfolio = report.get("portfolio") or {}; meta = report.get("report_meta") or {}
-    return {"service": "iea-assistant", "status": report.get("status", "unknown"), "pipeline_status": report.get("pipeline_status"),
-        "finished_at": report.get("finished_at"), "health_status": report.get("health_status"),
-        "report": {"fresh": meta.get("fresh"), "age_seconds": meta.get("age_seconds"), "max_age_seconds": meta.get("max_age_seconds"), "path": meta.get("path")},
-        "market_session": report.get("market_session"), "market_status": intelligence.get("market_status"), "market_regime": intelligence.get("regime"),
-        "market_score": intelligence.get("score"), "data_quality": intelligence.get("data_quality"),
-        "live_market": {"status": live_market.get("status", "NOT_CONFIGURED"), "provider": live_market.get("provider"), "requested_symbols": live_market.get("requested_symbols", []), "actionable_count": live_market.get("actionable_count", 0), "signals": live_market.get("signals", []), "errors": live_market.get("errors", [])},
-        "central_bank": {"ingestion_status": central_bank.get("ingestion_status"), "indicator_count": central_bank.get("indicator_count"), "monetary_impulse": central_bank.get("monetary_impulse"), "monetary_policy_index": central_bank.get("monetary_policy_index"), "stored_observation_count": central_bank.get("stored_observation_count")},
-        "portfolio": {"capital": portfolio.get("capital"), "equity": portfolio.get("equity"), "current_exposure": portfolio.get("current_exposure"), "current_risk": portfolio.get("current_risk"), "drawdown": portfolio.get("drawdown")}}
+    return {"service": "iea-assistant", "status": report.get("status", "unknown"), "pipeline_status": report.get("pipeline_status"), "finished_at": report.get("finished_at"), "health_status": report.get("health_status"), "report": {"fresh": meta.get("fresh"), "age_seconds": meta.get("age_seconds"), "max_age_seconds": meta.get("max_age_seconds"), "path": meta.get("path")}, "market_session": report.get("market_session"), "market_status": intelligence.get("market_status"), "market_regime": intelligence.get("regime"), "market_score": intelligence.get("score"), "data_quality": intelligence.get("data_quality"), "live_market": {"status": live_market.get("status", "NOT_CONFIGURED"), "provider": live_market.get("provider"), "requested_symbols": live_market.get("requested_symbols", []), "actionable_count": live_market.get("actionable_count", 0), "signals": live_market.get("signals", []), "errors": live_market.get("errors", [])}, "central_bank": {"ingestion_status": central_bank.get("ingestion_status"), "indicator_count": central_bank.get("indicator_count"), "monetary_impulse": central_bank.get("monetary_impulse"), "monetary_policy_index": central_bank.get("monetary_policy_index"), "stored_observation_count": central_bank.get("stored_observation_count")}, "portfolio": {"capital": portfolio.get("capital"), "equity": portfolio.get("equity"), "current_exposure": portfolio.get("current_exposure"), "current_risk": portfolio.get("current_risk"), "drawdown": portfolio.get("drawdown")}}
 
 
 def _load_fresh_report(report_path: str) -> dict[str, Any]:
@@ -34,6 +27,49 @@ def _first_number(*values: Any) -> float | None:
             if value is not None: return float(value)
         except (TypeError, ValueError): pass
     return None
+
+
+def _clip(value: float, low: float = 0.0, high: float = 100.0) -> float:
+    return round(max(low, min(high, value)), 2)
+
+
+def _flow_strength(flow: dict[str, Any], prefix: str) -> float | None:
+    buy = _first_number(flow.get(f"{prefix}_buy_value"), flow.get(f"{prefix}_buy_volume"))
+    sell = _first_number(flow.get(f"{prefix}_sell_value"), flow.get(f"{prefix}_sell_volume"))
+    if buy is None or sell is None or buy + sell <= 0: return None
+    return (buy - sell) / (buy + sell)
+
+
+def _canslim_market_scores(one: dict[str, Any], flow: dict[str, Any], holder: dict[str, Any], market_return: float | None, sector_return: float | None) -> dict[str, Any]:
+    """Build transparent CAN SLIM S/L/I/M scores from observed data only.
+
+    I is intentionally a sponsorship proxy (legal flow + major-holder activity), not a
+    claim that TSETMC identifies institutional ownership. Missing benchmarks remain None.
+    """
+    volume_trend = _first_number(one.get("volume_trend_pct"))
+    real_ratio = _flow_strength(flow, "real")
+    legal_ratio = _flow_strength(flow, "legal")
+    holder_change = _first_number(holder.get("entries", [{}])[0].get("change") if holder.get("entries") else None)
+
+    s_parts = [50.0 + max(-50.0, min(50.0, volume_trend or 0.0)) * 0.30, 50.0 + (real_ratio * 50.0 if real_ratio is not None else 0.0)]
+    s = _clip(sum(s_parts) / len(s_parts)) if volume_trend is not None or real_ratio is not None else None
+
+    relative_returns = [r for r in (market_return, sector_return) if r is not None]
+    if relative_returns:
+        stock_return = _first_number(one.get("return_pct"))
+        excess = sum(stock_return - r for r in relative_returns) / len(relative_returns) if stock_return is not None else None
+        l = _clip(50.0 + excess * 5.0) if excess is not None else None
+    else:
+        l = None
+
+    i_parts = [50.0 + legal_ratio * 50.0] if legal_ratio is not None else []
+    if holder_change is not None:
+        # Holder-change magnitude is directionally informative; cap its influence.
+        i_parts.append(50.0 + max(-50.0, min(50.0, holder_change)) * 0.5)
+    i = _clip(sum(i_parts) / len(i_parts)) if i_parts else None
+
+    m = _clip(50.0 + market_return * 5.0) if market_return is not None else None
+    return {"S": s, "L": l, "I": i, "M": m, "inputs": {"volume_trend_pct": volume_trend, "real_flow_balance_ratio": real_ratio, "legal_flow_balance_ratio": legal_ratio, "major_shareholder_change": holder_change, "stock_return_pct": one.get("return_pct"), "market_benchmark_return_pct": market_return, "sector_benchmark_return_pct": sector_return}, "proxy_notes": {"S": "volume trend + real-money flow balance", "L": "relative return versus configured market/sector benchmark", "I": "legal-flow and major-shareholder sponsorship proxy; not verified institutional ownership", "M": "configured market benchmark return"}}
 
 
 def create_app(report_path: str | None = None) -> Any:
@@ -75,7 +111,8 @@ def create_app(report_path: str | None = None) -> Any:
     def stock_canslim(symbol: str) -> dict[str, Any]:
         """Professional stock review: market, flows, holders, Codal statements and CAN SLIM."""
         try:
-            data = IranMarketProvider().research_data(symbol, days=23)
+            provider = IranMarketProvider()
+            data = provider.research_data(symbol, days=23)
             instrument = data.get("instrument_info") or {}; one = data.get("one_month") or {}; flow = data.get("money_flow") or {}
             holder = data.get("major_shareholder_change") or {}; daily = data.get("daily") or []; current = daily[0] if daily else {}
             price = _first_number(current.get("pClosing"), current.get("pDrCotVal")); high = _first_number(current.get("priceMax")); low = _first_number(current.get("priceMin"))
@@ -84,28 +121,32 @@ def create_app(report_path: str | None = None) -> Any:
             statement_source = "tsetmc_statement_content" if statement_content else "codal_metadata_fallback"
             fundamentals = parse_financials(statement_content or data.get("codal_filings") or [])
             ratios = fundamentals["ratios"]; values = fundamentals["values"]; growth = fundamentals["growth"]
+            market_benchmark_symbol = os.getenv("IEA_IR_MARKET_INDEX_SYMBOL", "").strip()
+            sector_benchmark_symbol = os.getenv("IEA_IR_SECTOR_BENCHMARK_SYMBOL", "").strip()
+            market_return = provider._daily_return(market_benchmark_symbol) if market_benchmark_symbol and market_benchmark_symbol != symbol else None
+            sector_return = provider._daily_return(sector_benchmark_symbol) if sector_benchmark_symbol and sector_benchmark_symbol != symbol else None
+            market_scores = _canslim_market_scores(one, flow, holder, market_return, sector_return)
             analysis = analyze_canslim(symbol=data["symbol"], data=CanSlimInput(
-                price_near_high=near_high, one_month_return_pct=one.get("return_pct"), one_month_high=one.get("high"), one_month_low=one.get("low"),
-                one_month_avg_volume=one.get("avg_volume"), volume_trend_pct=one.get("volume_trend_pct"), net_real_money=flow.get("real_net_value"), net_legal_money=flow.get("legal_net_value"),
+                price_near_high=near_high, demand_score=market_scores["S"], leader_score=market_scores["L"], institutional_sponsorship_score=market_scores["I"], market_trend_score=market_scores["M"],
+                market_benchmark_return_pct=market_return, sector_benchmark_return_pct=sector_return,
+                one_month_return_pct=one.get("return_pct"), one_month_high=one.get("high"), one_month_low=one.get("low"), one_month_avg_volume=one.get("avg_volume"), volume_trend_pct=one.get("volume_trend_pct"), net_real_money=flow.get("real_net_value"), net_legal_money=flow.get("legal_net_value"),
                 major_shareholder_change_pct=_first_number(holder.get("entries", [{}])[0].get("change") if holder.get("entries") else None),
-                pe=_first_number(instrument.get("pe"), instrument.get("pE")), pb=_first_number(instrument.get("pb"), instrument.get("pB")),
-                ps=_first_number(instrument.get("ps"), instrument.get("pS")), market_cap=_first_number(instrument.get("marketValue"), instrument.get("marketCap")),
-                sector_pe=_first_number(instrument.get("sectorPE"), instrument.get("sectorPe")), revenue_growth_pct=growth["revenue_growth_pct"],
-                gross_margin_pct=ratios["gross_margin_pct"], operating_margin_pct=ratios["operating_margin_pct"], net_margin_pct=ratios["net_margin_pct"],
-                free_cash_flow=ratios["free_cash_flow"], operating_cash_flow=values["operating_cash_flow"], debt_to_equity=ratios["debt_to_equity"],
-                current_ratio=ratios["current_ratio"], roe_pct=ratios["roe_pct"], roic_pct=ratios["roic_pct"], asset_growth_pct=growth["asset_growth_pct"],
-                current_eps_growth_pct=growth["eps_growth_pct"], annual_eps_growth_pct=growth["annual_eps_growth_pct"]))
+                pe=_first_number(instrument.get("pe"), instrument.get("pE")), forward_pe=_first_number(instrument.get("forwardPE"), instrument.get("forwardPe")), pb=_first_number(instrument.get("pb"), instrument.get("pB")),
+                ps=_first_number(instrument.get("ps"), instrument.get("pS")), ev_ebitda=_first_number(instrument.get("evEbitda"), instrument.get("evEBITDA")), ev_sales=_first_number(instrument.get("evSales")),
+                market_cap=_first_number(instrument.get("marketValue"), instrument.get("marketCap")), enterprise_value=_first_number(instrument.get("enterpriseValue")),
+                sector_pe=_first_number(instrument.get("sectorPE"), instrument.get("sectorPe")), sector_pb=_first_number(instrument.get("sectorPB"), instrument.get("sectorPb")), sector_ps=_first_number(instrument.get("sectorPS"), instrument.get("sectorPs")),
+                sector_ev_ebitda=_first_number(instrument.get("sectorEVEBITDA"), instrument.get("sectorEvEbitda")), sector_ev_sales=_first_number(instrument.get("sectorEVSales"), instrument.get("sectorEvSales")), dividend_yield_pct=_first_number(instrument.get("dividendYield"), instrument.get("dividendYieldPct")),
+                revenue_growth_pct=growth["revenue_growth_pct"], gross_margin_pct=ratios["gross_margin_pct"], operating_margin_pct=ratios["operating_margin_pct"], net_margin_pct=ratios["net_margin_pct"],
+                free_cash_flow=ratios["free_cash_flow"], operating_cash_flow=values["operating_cash_flow"], debt_to_equity=ratios["debt_to_equity"], current_ratio=ratios["current_ratio"], roe_pct=ratios["roe_pct"], roic_pct=ratios["roic_pct"], asset_growth_pct=growth["asset_growth_pct"], current_eps_growth_pct=growth["eps_growth_pct"], annual_eps_growth_pct=growth["annual_eps_growth_pct"]))
             analysis["market_data"] = {"provider": "tsetmc", "data_date": data.get("data_date"), "price": price, "market_status": "CLOSED"}
+            analysis["canslim_market_context"] = market_scores
+            analysis["benchmark_configuration"] = {"market_index_symbol_configured": bool(market_benchmark_symbol), "sector_benchmark_symbol_configured": bool(sector_benchmark_symbol)}
             analysis["one_month_behavior"] = data.get("one_month"); analysis["money_flow"] = flow
             analysis["major_shareholders"] = data.get("major_shareholders"); analysis["major_shareholder_change"] = holder
             analysis["capital_and_share_changes"] = data.get("share_changes")
             analysis["codal_filings"] = {"count": len(data.get("codal_filings") or []), "items": data.get("codal_filings") or [], "statement_parser": fundamentals["status"]}
-            analysis["financial_statements"] = fundamentals
-            analysis["financial_statement_source"] = statement_source
-            analysis["data_quality"] = {"tsetmc_market": True, "one_month_history": bool(data.get("daily")), "money_flow_history": bool(data.get("client_type_history")),
-                "major_shareholders": bool(data.get("major_shareholders")), "codal_metadata": bool(data.get("codal_filings")),
-                "statement_content": bool(statement_content), "fundamental_statement_values": fundamentals["status"] == "READY", "multi_period_fundamentals": len(fundamentals.get("periods") or []) >= 2,
-                "annual_fundamentals": bool(fundamentals["growth"].get("annual_eps_growth_pct") is not None or fundamentals["growth"].get("annual_revenue_growth_pct") is not None)}
+            analysis["financial_statements"] = fundamentals; analysis["financial_statement_source"] = statement_source
+            analysis["data_quality"] = {"tsetmc_market": True, "one_month_history": bool(data.get("daily")), "money_flow_history": bool(data.get("client_type_history")), "major_shareholders": bool(data.get("major_shareholders")), "codal_metadata": bool(data.get("codal_filings")), "statement_content": bool(statement_content), "fundamental_statement_values": fundamentals["status"] == "READY", "multi_period_fundamentals": len(fundamentals.get("periods") or []) >= 2, "annual_fundamentals": bool(fundamentals["growth"].get("annual_eps_growth_pct") is not None or fundamentals["growth"].get("annual_revenue_growth_pct") is not None), "canslim_S": market_scores["S"] is not None, "canslim_L": market_scores["L"] is not None, "canslim_I": market_scores["I"] is not None, "canslim_M": market_scores["M"] is not None}
             return analysis
         except (RuntimeError, ValueError, OSError, KeyError) as exc: raise HTTPException(status_code=502, detail=str(exc)) from exc
 
