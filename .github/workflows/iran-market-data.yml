@@ -1,0 +1,48 @@
+name: IEA Iran Market Data Mirror
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/15 * * * *"
+  push:
+    paths:
+      - "scripts/publish_iran_market_data.py"
+      - ".github/workflows/iran-market-data.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install requests
+        run: python -m pip install requests
+
+      - name: Fetch TSETMC data
+        env:
+          IEA_IR_SYMBOLS: "فولاد,فملی,شستا,خودرو,وبملت"
+        run: python scripts/publish_iran_market_data.py
+
+      - name: Publish mirror branch
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin market-data || true
+          git checkout -B market-data
+          git add data/iran_market_live.json
+          git commit -m "Update Iran market data mirror" || echo "No data changes"
+          git push origin HEAD:market-data --force
