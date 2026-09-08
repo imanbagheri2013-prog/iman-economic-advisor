@@ -2,23 +2,28 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
 
-# Railway cannot reliably reach the modern TSETMC CDN. GitHub Actions is used
-# as the external collector, and the legacy bulk MarketWatch feed gives all
-# instruments in one request, avoiding dozens of fragile per-symbol CDN calls.
-MARKETWATCH_URL = os.getenv(
-    "IEA_TSETMC_MARKETWATCH_URL",
+# Railway cannot reliably reach TSETMC directly. GitHub Actions is the
+# external collector. Prefer the legacy bulk MarketWatch feed so one request
+# supplies the whole market instead of many fragile per-symbol CDN calls.
+MARKETWATCH_URLS = [
+    os.getenv("IEA_TSETMC_MARKETWATCH_URL", "https://old.tsetmc.com/tsev2/data/MarketWatchPlus.aspx"),
     "http://old.tsetmc.com/tsev2/data/MarketWatchPlus.aspx",
-)
+    "https://members.tsetmc.com/tsev2/data/MarketWatchPlus.aspx",
+]
 SYMBOLS = ["فولاد", "فملی", "شستا", "خودرو", "وبملت"]
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126 Safari/537.36",
     "Accept": "text/plain,text/*,*/*",
-    "Referer": "http://old.tsetmc.com/",
+    "Referer": "https://www.tsetmc.com/",
+    "Origin": "https://www.tsetmc.com",
+    "Accept-Encoding": "gzip, deflate",
+    "Connection": "keep-alive",
 }
 
 
@@ -29,30 +34,38 @@ def number(value: str):
         return None
 
 
-def fetch_marketwatch() -> dict[str, list[str]]:
-    response = requests.get(MARKETWATCH_URL, headers=HEADERS, timeout=30)
-    response.raise_for_status()
-    text = response.content.decode("utf-8", errors="ignore")
-    parts = text.split("@")
-    if len(parts) < 3:
-        raise RuntimeError("TSETMC legacy MarketWatch response has no quote section")
+def fetch_marketwatch() -> tuple[dict[str, list[str]], str]:
+    last_error: Exception | None = None
+    for url in MARKETWATCH_URLS:
+        for attempt in range(3):
+            try:
+                response = requests.get(url, headers=HEADERS, timeout=25)
+                response.raise_for_status()
+                text = response.content.decode("utf-8-sig", errors="ignore")
+                parts = text.split("@")
+                if len(parts) < 3:
+                    raise RuntimeError("response has no quote section")
 
-    rows: dict[str, list[str]] = {}
-    # MarketWatchPlus section 2 is the instrument quote table.
-    for raw in parts[2].split(";"):
-        fields = raw.split(",")
-        if len(fields) >= 23 and fields[2].strip():
-            rows[fields[2].strip()] = fields
-    if not rows:
-        raise RuntimeError("TSETMC legacy MarketWatch returned no instrument rows")
-    return rows
+                rows: dict[str, list[str]] = {}
+                for raw in parts[2].split(";"):
+                    fields = raw.split(",")
+                    if len(fields) >= 23 and fields[2].strip():
+                        rows[fields[2].strip()] = fields
+                if rows:
+                    return rows, url
+                raise RuntimeError("no instrument rows returned")
+            except (requests.RequestException, RuntimeError) as exc:
+                last_error = exc
+                if attempt < 2:
+                    time.sleep(1 + attempt * 2)
+    raise RuntimeError(f"all TSETMC legacy endpoints failed: {last_error}")
 
 
 def main() -> None:
     output = Path("data/iran_market_live.json")
     output.parent.mkdir(parents=True, exist_ok=True)
     requested = [x.strip() for x in os.getenv("IEA_IR_SYMBOLS", ",".join(SYMBOLS)).split(",") if x.strip()]
-    rows = fetch_marketwatch()
+    rows, source_url = fetch_marketwatch()
     symbols: dict[str, dict] = {}
     errors: dict[str, str] = {}
     generated_at = datetime.now(timezone.utc).isoformat()
@@ -89,7 +102,7 @@ def main() -> None:
 
     payload = {
         "generated_at": generated_at,
-        "source": "tsetmc-legacy-marketwatch-via-github-actions",
+        "source": f"tsetmc-legacy-marketwatch-via-github-actions:{source_url}",
         "market_status": "LIVE_OR_CLOSED_FROM_TSETMC_FEED",
         "symbols": symbols,
         "errors": errors,
