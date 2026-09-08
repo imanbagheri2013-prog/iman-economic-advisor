@@ -19,6 +19,9 @@ HEADERS = {
     "Origin": "https://www.tsetmc.com",
 }
 
+# This workflow intentionally collects the live symbols outside Railway, where
+# TSETMC's public API is reachable, and publishes a read-only mirror for IEA.
+
 
 def get(session: requests.Session, path: str) -> dict:
     last = None
