@@ -3,7 +3,6 @@ from __future__ import annotations
 import re
 from typing import Any
 
-
 ALIASES: dict[str, tuple[str, ...]] = {
     "revenue": ("revenue", "sales", "revenues", "درآمد عملیاتی", "فروش"),
     "gross_profit": ("gross_profit", "grossprofit", "gross profit", "سود ناخالص", "سود ناخالص عملیاتی"),
@@ -20,10 +19,7 @@ ALIASES: dict[str, tuple[str, ...]] = {
     "dividend": ("dividend", "dividend per share", "سود تقسیمی", "سود نقدی هر سهم"),
 }
 
-_PERIOD_KEYS = (
-    "period", "period_name", "periodName", "fiscal_year", "fiscalYear", "report_date", "reportDate",
-    "period_end", "periodEnd", "date", "dEven", "year", "سال مالی", "دوره", "تاریخ گزارش",
-)
+_PERIOD_KEYS = ("period", "period_name", "periodName", "fiscal_year", "fiscalYear", "report_date", "reportDate", "period_end", "periodEnd", "date", "dEven", "year", "سال مالی", "دوره", "تاریخ گزارش")
 
 
 def _norm(value: Any) -> str:
@@ -36,8 +32,7 @@ def _number(value: Any) -> float | None:
     if isinstance(value, (int, float)):
         return float(value)
     text = str(value).replace(",", "").replace("٬", "").replace(" ", "")
-    # Persian/Arabic digits are common in Codal labels and period fields.
-    text = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789").__class__ and text.translate(str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789"))
+    text = text.translate(str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789"))
     try:
         return float(text)
     except ValueError:
@@ -73,11 +68,9 @@ def _find(payload: Any, aliases: tuple[str, ...]) -> float | None:
 
 
 def _period_label(row: dict[str, Any]) -> str | None:
-    for key in _PERIOD_KEYS:
-        if key in row and row[key] not in (None, ""):
-            return str(row[key])
+    wanted = {_norm(x) for x in _PERIOD_KEYS}
     for key, value in row.items():
-        if _norm(key) in {_norm(x) for x in _PERIOD_KEYS} and value not in (None, ""):
+        if _norm(key) in wanted and value not in (None, ""):
             return str(value)
     return None
 
@@ -101,8 +94,6 @@ def _period_rows(payload: Any) -> list[dict[str, Any]]:
             continue
         label = _period_label(item)
         rows.append((_period_rank(label, index), {"period": label, "values": values}))
-    # Most TSETMC/Codal lists are newest-first; explicit period/date values are
-    # sorted newest-first while rows without a period keep their source order.
     rows.sort(key=lambda pair: pair[0], reverse=True)
     deduped: list[dict[str, Any]] = []
     seen: set[tuple[str | None, tuple[tuple[str, float | None], ...]]] = set()
@@ -127,37 +118,24 @@ def _series_growth(rows: list[dict[str, Any]], field: str) -> float | None:
 
 
 def _annual_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    annual_markers = ("annual", "year", "12 month", "12-month", "۱۲ ماه", "سالانه", "سالیانه", "12ماهه")
-    selected = [row for row in rows if any(marker in _norm(row.get("period")) for marker in annual_markers)]
-    return selected
+    markers = ("annual", "year", "12 month", "12-month", "۱۲ ماه", "سالانه", "سالیانه", "12ماهه")
+    return [row for row in rows if any(marker in _norm(row.get("period")) for marker in markers)]
 
 
 def parse_financials(payload: Any) -> dict[str, Any]:
-    """Extract conservative financial metrics from Codal/TSETMC payloads.
-
-    The parser never fabricates a missing value. When multiple statement periods
-    are present, it uses the newest two periods for sequential growth and only
-    labels annual EPS growth when the source explicitly identifies annual data.
-    """
+    """Extract conservative financial metrics from Codal/TSETMC payloads."""
     values = {name: _find(payload, aliases) for name, aliases in ALIASES.items()}
     periods = _period_rows(payload)
     latest = periods[0]["values"] if periods else values
-    # Prefer the newest identified period for scalar statement values.
     for name in values:
         if latest.get(name) is not None:
             values[name] = latest[name]
 
-    revenue = values["revenue"]
-    gross = values["gross_profit"]
-    operating = values["operating_profit"]
-    net = values["net_income"]
-    assets = values["assets"]
-    liabilities = values["liabilities"]
-    equity = values["equity"]
-    current_assets = values["current_assets"]
-    current_liabilities = values["current_liabilities"]
-    ocf = values["operating_cash_flow"]
-    capex = values["capex"]
+    revenue, gross = values["revenue"], values["gross_profit"]
+    operating, net = values["operating_profit"], values["net_income"]
+    assets, liabilities, equity = values["assets"], values["liabilities"], values["equity"]
+    current_assets, current_liabilities = values["current_assets"], values["current_liabilities"]
+    ocf, capex = values["operating_cash_flow"], values["capex"]
     fcf = None if ocf is None else ocf - abs(capex or 0.0)
     annual = _annual_rows(periods)
     growth = {
@@ -181,7 +159,6 @@ def parse_financials(payload: Any) -> dict[str, Any]:
             "current_ratio": None if current_assets is None or current_liabilities in (None, 0) else current_assets / current_liabilities,
             "roe_pct": None if net is None or equity in (None, 0) else net / equity * 100,
             "roa_pct": None if net is None or assets in (None, 0) else net / assets * 100,
-            # Conservative proxy: true ROIC needs invested capital and tax data.
             "roic_pct": None if operating is None or assets in (None, 0) else operating / assets * 100,
             "free_cash_flow": fcf,
             "free_cash_flow_margin_pct": fcf_margin,
