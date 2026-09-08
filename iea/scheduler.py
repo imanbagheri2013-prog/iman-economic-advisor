@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 from copy import deepcopy
@@ -22,13 +23,15 @@ from .providers.iran_market import IranMarketProvider, configured_iran_symbols
 from .providers.market import YahooChartProvider, configured_symbols
 from .runtime import load_equity_payload
 
-REPORT_PATH = Path("health_report.json")
-MARKET_STATE_PATH = Path("iran_market_state.json")
+LOGGER = logging.getLogger("iea.scheduler")
+REPORT_PATH = Path(os.getenv("IEA_REPORT_PATH", "health_report.json"))
+MARKET_STATE_PATH = Path(os.getenv("IEA_MARKET_STATE_PATH", "iran_market_state.json"))
 MAX_PULL_ATTEMPTS = 3
 RETRY_DELAYS_SECONDS = (2, 5)
 
 
 def _save_report(payload: dict) -> None:
+    REPORT_PATH.parent.mkdir(parents=True, exist_ok=True)
     REPORT_PATH.write_text(json.dumps(payload, default=str, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
@@ -44,6 +47,7 @@ def _publish_report(payload: dict) -> None:
 
 
 def _save_market_state(intelligence: dict) -> None:
+    MARKET_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
     MARKET_STATE_PATH.write_text(json.dumps(intelligence, default=str, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
@@ -275,6 +279,10 @@ def run() -> int:
             payload["advisor"] = equity_cycle
         _save_report(payload)
         _publish_report(payload)
+        LOGGER.info(
+            "IEA scheduler cycle: status=%s pipeline=%s health=%s observations=%s central_bank=%s market=%s report=%s",
+            status, pipeline_status, health_status, store.count(), store.count_central_bank(), market_status, REPORT_PATH,
+        )
         print(json.dumps(payload, default=str, ensure_ascii=False, indent=2))
         return exit_code
     except Exception as exc:
@@ -285,6 +293,7 @@ def run() -> int:
             _publish_report(payload)
         except Exception:
             pass
+        LOGGER.exception("IEA scheduler cycle failed: type=%s", type(exc).__name__)
         print(json.dumps(payload, ensure_ascii=False, indent=2))
         return 1
     finally:
