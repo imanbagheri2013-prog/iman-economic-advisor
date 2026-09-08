@@ -4,6 +4,8 @@ import os
 from typing import Any
 
 from .assistant_runtime import answer, load_report
+from .canslim import CanSlimInput, analyze_canslim
+from .providers.iran_market import IranMarketProvider
 
 
 def _status_payload(report: dict[str, Any]) -> dict[str, Any]:
@@ -13,49 +15,25 @@ def _status_payload(report: dict[str, Any]) -> dict[str, Any]:
     portfolio = report.get("portfolio") or {}
     meta = report.get("report_meta") or {}
     return {
-        "service": "iea-assistant",
-        "status": report.get("status", "unknown"),
-        "pipeline_status": report.get("pipeline_status"),
-        "finished_at": report.get("finished_at"),
+        "service": "iea-assistant", "status": report.get("status", "unknown"),
+        "pipeline_status": report.get("pipeline_status"), "finished_at": report.get("finished_at"),
         "health_status": report.get("health_status"),
-        "report": {
-            "fresh": meta.get("fresh"),
-            "age_seconds": meta.get("age_seconds"),
-            "max_age_seconds": meta.get("max_age_seconds"),
-            "path": meta.get("path"),
-        },
-        "market_session": report.get("market_session"),
-        "market_status": intelligence.get("market_status"),
-        "market_regime": intelligence.get("regime"),
-        "market_score": intelligence.get("score"),
+        "report": {"fresh": meta.get("fresh"), "age_seconds": meta.get("age_seconds"), "max_age_seconds": meta.get("max_age_seconds"), "path": meta.get("path")},
+        "market_session": report.get("market_session"), "market_status": intelligence.get("market_status"),
+        "market_regime": intelligence.get("regime"), "market_score": intelligence.get("score"),
         "data_quality": intelligence.get("data_quality"),
-        "live_market": {
-            "status": live_market.get("status", "NOT_CONFIGURED"),
-            "provider": live_market.get("provider"),
-            "requested_symbols": live_market.get("requested_symbols", []),
-            "actionable_count": live_market.get("actionable_count", 0),
-            "signals": live_market.get("signals", []),
-            "errors": live_market.get("errors", []),
-        },
-        "central_bank": {
-            "ingestion_status": central_bank.get("ingestion_status"),
-            "indicator_count": central_bank.get("indicator_count"),
-            "monetary_impulse": central_bank.get("monetary_impulse"),
-            "monetary_policy_index": central_bank.get("monetary_policy_index"),
-            "stored_observation_count": central_bank.get("stored_observation_count"),
-        },
-        "portfolio": {
-            "capital": portfolio.get("capital"),
-            "equity": portfolio.get("equity"),
-            "current_exposure": portfolio.get("current_exposure"),
-            "current_risk": portfolio.get("current_risk"),
-            "drawdown": portfolio.get("drawdown"),
-        },
+        "live_market": {"status": live_market.get("status", "NOT_CONFIGURED"), "provider": live_market.get("provider"),
+            "requested_symbols": live_market.get("requested_symbols", []), "actionable_count": live_market.get("actionable_count", 0),
+            "signals": live_market.get("signals", []), "errors": live_market.get("errors", [])},
+        "central_bank": {"ingestion_status": central_bank.get("ingestion_status"), "indicator_count": central_bank.get("indicator_count"),
+            "monetary_impulse": central_bank.get("monetary_impulse"), "monetary_policy_index": central_bank.get("monetary_policy_index"),
+            "stored_observation_count": central_bank.get("stored_observation_count")},
+        "portfolio": {"capital": portfolio.get("capital"), "equity": portfolio.get("equity"), "current_exposure": portfolio.get("current_exposure"),
+            "current_risk": portfolio.get("current_risk"), "drawdown": portfolio.get("drawdown")},
     }
 
 
 def _load_fresh_report(report_path: str) -> dict[str, Any]:
-    """Load the trusted report and enforce the freshness boundary for decisions."""
     report = load_report(report_path)
     meta = report.get("report_meta") or {}
     if meta.get("fresh") is not True:
@@ -64,14 +42,13 @@ def _load_fresh_report(report_path: str) -> dict[str, Any]:
 
 
 def create_app(report_path: str | None = None) -> Any:
-    """Create the HTTP API backed by the scheduler's latest trusted report."""
     resolved_report_path = report_path or os.getenv("IEA_REPORT_PATH", "health_report.json")
     try:
         from fastapi import FastAPI, HTTPException, Header
     except ImportError as exc:  # pragma: no cover
         raise RuntimeError("FastAPI is required for the IEA API") from exc
 
-    app = FastAPI(title="IEA Assistant API", version="1.3.0")
+    app = FastAPI(title="IEA Assistant API", version="1.4.0")
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -88,10 +65,10 @@ def create_app(report_path: str | None = None) -> Any:
             raise HTTPException(status_code=400, detail="Invalid trusted report")
         try:
             from pathlib import Path
+            import json
             target = Path(resolved_report_path)
             target.parent.mkdir(parents=True, exist_ok=True)
             temp = target.with_suffix(target.suffix + ".tmp")
-            import json
             temp.write_text(json.dumps(payload, default=str, ensure_ascii=False, indent=2), encoding="utf-8")
             temp.replace(target)
         except OSError as exc:
@@ -112,6 +89,39 @@ def create_app(report_path: str | None = None) -> Any:
     @app.get("/status")
     def status() -> dict[str, Any]:
         return _status_payload(load_report(resolved_report_path))
+
+    @app.get("/stock/canslim")
+    def stock_canslim(symbol: str) -> dict[str, Any]:
+        """Analyze a named Iran stock and explicitly report the data date.
+
+        Price/volume/session data comes from TSETMC. Fundamental CAN SLIM
+        criteria are marked unavailable until verified company/Codal data is
+        supplied; the endpoint never fills those fields with guesses.
+        """
+        try:
+            snapshot = IranMarketProvider().snapshot(symbol)
+            near_high = None
+            if snapshot.high and snapshot.low and snapshot.high > snapshot.low:
+                near_high = snapshot.price >= snapshot.low + 0.8 * (snapshot.high - snapshot.low)
+            analysis = analyze_canslim(symbol=snapshot.symbol, data=CanSlimInput(
+                price_near_high=near_high,
+                demand_score=None,
+                leader_score=None,
+                market_trend_score=None,
+                current_eps_growth_pct=None,
+                annual_eps_growth_pct=None,
+                new_catalyst=None,
+                institutional_sponsorship_score=None,
+            ))
+            analysis["market_data"] = {
+                "provider": "tsetmc", "data_date": snapshot.data_date,
+                "market_status": snapshot.market_status, "price": snapshot.price,
+                "previous_close": snapshot.previous_close, "observed_at": snapshot.observed_at.isoformat(),
+            }
+            analysis["execution"] = "NO_TRADE" if snapshot.market_status == "CLOSED" else "LIVE_ELIGIBLE"
+            return analysis
+        except (RuntimeError, ValueError, OSError) as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     @app.get("/answer")
     def get_answer(question: str) -> dict[str, Any]:
