@@ -41,7 +41,7 @@ def create_app(report_path: str | None = None) -> Any:
     try:
         from fastapi import FastAPI, HTTPException, Header
     except ImportError as exc: raise RuntimeError("FastAPI is required for the IEA API") from exc
-    app = FastAPI(title="IEA Assistant API", version="1.8.0")
+    app = FastAPI(title="IEA Assistant API", version="1.8.1")
 
     @app.get("/health")
     def health() -> dict[str, str]: return {"status": "ok", "service": "iea-assistant"}
@@ -80,7 +80,9 @@ def create_app(report_path: str | None = None) -> Any:
             holder = data.get("major_shareholder_change") or {}; daily = data.get("daily") or []; current = daily[0] if daily else {}
             price = _first_number(current.get("pClosing"), current.get("pDrCotVal")); high = _first_number(current.get("priceMax")); low = _first_number(current.get("priceMin"))
             near_high = None if price is None or high is None or low is None or high <= low else price >= low + .8 * (high - low)
-            fundamentals = parse_financials(data.get("codal_filings") or [])
+            statement_content = data.get("statement_content") or []
+            statement_source = "tsetmc_statement_content" if statement_content else "codal_metadata_fallback"
+            fundamentals = parse_financials(statement_content or data.get("codal_filings") or [])
             ratios = fundamentals["ratios"]; values = fundamentals["values"]; growth = fundamentals["growth"]
             analysis = analyze_canslim(symbol=data["symbol"], data=CanSlimInput(
                 price_near_high=near_high, one_month_return_pct=one.get("return_pct"), one_month_high=one.get("high"), one_month_low=one.get("low"),
@@ -99,9 +101,10 @@ def create_app(report_path: str | None = None) -> Any:
             analysis["capital_and_share_changes"] = data.get("share_changes")
             analysis["codal_filings"] = {"count": len(data.get("codal_filings") or []), "items": data.get("codal_filings") or [], "statement_parser": fundamentals["status"]}
             analysis["financial_statements"] = fundamentals
+            analysis["financial_statement_source"] = statement_source
             analysis["data_quality"] = {"tsetmc_market": True, "one_month_history": bool(data.get("daily")), "money_flow_history": bool(data.get("client_type_history")),
                 "major_shareholders": bool(data.get("major_shareholders")), "codal_metadata": bool(data.get("codal_filings")),
-                "fundamental_statement_values": fundamentals["status"] == "READY", "multi_period_fundamentals": len(fundamentals.get("periods") or []) >= 2,
+                "statement_content": bool(statement_content), "fundamental_statement_values": fundamentals["status"] == "READY", "multi_period_fundamentals": len(fundamentals.get("periods") or []) >= 2,
                 "annual_fundamentals": bool(fundamentals["growth"].get("annual_eps_growth_pct") is not None or fundamentals["growth"].get("annual_revenue_growth_pct") is not None)}
             return analysis
         except (RuntimeError, ValueError, OSError, KeyError) as exc: raise HTTPException(status_code=502, detail=str(exc)) from exc
