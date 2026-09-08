@@ -172,7 +172,12 @@ def analyze_canslim(symbol: str, data: CanSlimInput) -> dict[str, Any]:
     quality_score, quality_coverage = _weighted_score(
         [((100.0 if value is True else 0.0) if value is not None else None, weight) for value, weight in quality_items]
     )
-    fundamental_score = quality_score
+    fundamental_confidence = quality_coverage
+    fundamental_score = (
+        round(quality_score * fundamental_confidence / 100.0, 2)
+        if quality_score is not None
+        else None
+    )
     fundamental_missing = [
         name for name, metric in {**quality, **cash_quality}.items() if metric["pass"] is None
     ]
@@ -192,7 +197,9 @@ def analyze_canslim(symbol: str, data: CanSlimInput) -> dict[str, Any]:
         "valuation_diagnostics": valuation_diagnostics,
         "one_month_behavior": flow,
         "fundamental_score": fundamental_score,
+        "fundamental_quality_score": quality_score,
         "fundamental_score_coverage_pct": quality_coverage,
+        "fundamental_confidence_pct": fundamental_confidence,
         "fundamental_score_complete": fundamental_complete,
         "fundamental_missing_metrics": fundamental_missing,
         "disclaimer": "Heuristic analytical framework; not an official IBD/O'Neil rating or investment guarantee.",
