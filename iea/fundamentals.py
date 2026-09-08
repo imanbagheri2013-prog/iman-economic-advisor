@@ -108,7 +108,7 @@ def _period_rows(payload: Any) -> list[dict[str, Any]]:
 def _growth(current: float | None, previous: float | None) -> float | None:
     if current is None or previous in (None, 0):
         return None
-    return (current / previous - 1.0) * 100.0
+    return round((current / previous - 1.0) * 100.0, 10)
 
 
 def _series_growth(rows: list[dict[str, Any]], field: str) -> float | None:
