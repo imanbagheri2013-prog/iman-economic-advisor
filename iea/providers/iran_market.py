@@ -45,7 +45,6 @@ class IranMarketProvider:
         return payload
 
     def _get_optional(self, path: str) -> dict[str, Any]:
-        """Fetch a non-critical endpoint without breaking the core market response."""
         try:
             return self._get(path)
         except (requests.RequestException, ValueError):
@@ -69,6 +68,16 @@ class IranMarketProvider:
         if not code:
             raise ValueError(f"InsCode missing for {symbol}")
         return instrument, code
+
+    def _daily_return(self, symbol: str, days: int = 23) -> float | None:
+        _, code = self._ins_code(symbol)
+        rows = self._get(f"ClosingPrice/GetClosingPriceDailyList/{code}/{max(30, days + 5)}").get("closingPriceDaily") or []
+        rows = [r for r in rows if isinstance(r, dict)][:days]
+        prices = [_number(r.get("pClosing", r.get("pDrCotVal"))) for r in rows]
+        prices = [p for p in prices if p is not None]
+        if len(prices) < 2 or prices[-1] == 0:
+            return None
+        return round((prices[0] / prices[-1] - 1) * 100, 4)
 
     def snapshot(self, symbol: str) -> MarketSnapshot:
         instrument, code = self._ins_code(symbol)
@@ -97,15 +106,8 @@ class IranMarketProvider:
         client_history = self._get(f"ClientType/GetClientTypeHistory/{code}").get("clientType") or []
         shareholders = self._get(f"Shareholder/GetInstrumentShareHolderLast/{code}").get("shareHolder") or []
         codal = self._get(f"Codal/GetPreparedDataByInsCode/30/{code}").get("preparedData") or []
-        # TSETMC exposes statement content separately from Codal notification metadata.
-        # Keep this endpoint optional because installations/proxies may not expose it.
         statement_content_payload = self._get_optional(f"Codal/GetStatementContentByInsCode/{code}")
-        statement_content = (
-            statement_content_payload.get("statementContent")
-            or statement_content_payload.get("statementContents")
-            or statement_content_payload.get("data")
-            or []
-        )
+        statement_content = statement_content_payload.get("statementContent") or statement_content_payload.get("statementContents") or statement_content_payload.get("data") or []
         share_changes = self._get(f"Instrument/GetInstrumentShareChange/{code}").get("instrumentShareChange") or []
         daily = [r for r in daily if isinstance(r, dict)][:days]
         client_history = [r for r in client_history if isinstance(r, dict)][:days]
