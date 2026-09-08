@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 from typing import Any
@@ -13,6 +14,7 @@ from .providers.fred import FRED
 from .storage import Store
 
 
+LOGGER = logging.getLogger("iea.pipeline")
 DEFAULT_REGISTRY = Path("config/series.yaml")
 DEFAULT_DB = Path("data/iea.sqlite3")
 
@@ -52,20 +54,30 @@ def pull(registry_path: str | Path = DEFAULT_REGISTRY) -> Store:
         bls = BLS(api_key=config["bls_api_key"])
 
         for series_id in config["fred_series"]:
-            for observation in fred.observations(series_id):
-                store.upsert(observation)
+            try:
+                for observation in fred.observations(series_id):
+                    store.upsert(observation)
+            except Exception as exc:
+                LOGGER.warning("FRED series failed: series=%s type=%s error=%s", series_id, type(exc).__name__, exc)
 
         for series_id in config["bls_series"]:
-            observations = bls.observations(
-                series_id,
-                config["bls_start_year"],
-                config["bls_end_year"],
-            )
-            for observation in observations:
-                store.upsert(observation)
+            try:
+                observations = bls.observations(
+                    series_id,
+                    config["bls_start_year"],
+                    config["bls_end_year"],
+                )
+                for observation in observations:
+                    store.upsert(observation)
+            except Exception as exc:
+                LOGGER.warning("BLS series failed: series=%s type=%s error=%s", series_id, type(exc).__name__, exc)
 
-        for observation in fetch_observations(config["cbi_data_url"]):
-            store.upsert_central_bank(observation)
+        if config["cbi_data_url"]:
+            try:
+                for observation in fetch_observations(config["cbi_data_url"], timeout=12):
+                    store.upsert_central_bank(observation)
+            except Exception as exc:
+                LOGGER.warning("CBI source failed: type=%s error=%s", type(exc).__name__, exc)
 
         return store
     except Exception:
