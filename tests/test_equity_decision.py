@@ -98,7 +98,9 @@ def test_live_same_side_signal_validates_equity_decision():
         {
             "score": 70,
             "coverage": 1.0,
-            "factors": [],
+            "factors": [
+                {"name": "liquidity", "details": {"depth_imbalance": 0.0}},
+            ],
             "live_market_intelligence": {
                 "status": "OK",
                 "signals": [
@@ -118,7 +120,9 @@ def test_live_disagreement_blocks_equity_decision():
         {
             "score": 70,
             "coverage": 1.0,
-            "factors": [],
+            "factors": [
+                {"name": "liquidity", "details": {"depth_imbalance": 0.0}},
+            ],
             "live_market_intelligence": {
                 "status": "OK",
                 "signals": [
@@ -137,7 +141,9 @@ def test_live_stale_signal_blocks_equity_decision():
         {
             "score": 70,
             "coverage": 1.0,
-            "factors": [],
+            "factors": [
+                {"name": "liquidity", "details": {"depth_imbalance": 0.0}},
+            ],
             "live_market_intelligence": {
                 "status": "OK",
                 "signals": [
@@ -156,7 +162,9 @@ def test_live_non_actionable_signal_blocks_equity_decision():
         {
             "score": 70,
             "coverage": 1.0,
-            "factors": [],
+            "factors": [
+                {"name": "liquidity", "details": {"depth_imbalance": 0.0}},
+            ],
             "live_market_intelligence": {
                 "status": "OK",
                 "signals": [
@@ -175,7 +183,9 @@ def test_live_market_not_configured_preserves_existing_decision():
         {
             "score": 70,
             "coverage": 1.0,
-            "factors": [],
+            "factors": [
+                {"name": "liquidity", "details": {"depth_imbalance": 0.0}},
+            ],
             "live_market_intelligence": {"status": "NOT_CONFIGURED"},
         },
     )
