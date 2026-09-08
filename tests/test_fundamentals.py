@@ -48,8 +48,8 @@ def test_parse_financials_calculates_explicit_annual_growth():
     ]
     result = parse_financials(payload)
     assert result["growth"]["annual_revenue_growth_pct"] == 25.0
-    assert result["growth"]["annual_eps_growth_pct"] == (40 / 30 - 1) * 100
-    assert result["growth"]["annual_net_income_growth_pct"] == (240 / 180 - 1) * 100
+    assert result["growth"]["annual_eps_growth_pct"] == 33.3333333333
+    assert result["growth"]["annual_net_income_growth_pct"] == 33.3333333333
 
 
 def test_parse_financials_never_invents_missing_values():
