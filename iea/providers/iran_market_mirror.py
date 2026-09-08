@@ -20,13 +20,17 @@ class IranMarketMirrorProvider:
         self.timeout = timeout
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": "IEA-Economic-Advisor/market-mirror", "Accept": "application/json"})
+        self._cached_payload: dict[str, Any] | None = None
 
     def _payload(self) -> dict[str, Any]:
+        if self._cached_payload is not None:
+            return self._cached_payload
         response = self.session.get(self.url, timeout=self.timeout)
         response.raise_for_status()
         payload = response.json()
         if not isinstance(payload, dict) or not isinstance(payload.get("symbols"), dict):
             raise ValueError("Iran market mirror payload is invalid")
+        self._cached_payload = payload
         return payload
 
     def snapshot(self, symbol: str) -> MarketSnapshot:
@@ -60,38 +64,48 @@ class IranMarketMirrorProvider:
 class LegacyTsetmcMarketProvider:
     """Use the legacy MarketWatchPlus feed as a Railway-compatible fallback."""
 
-    def __init__(self, url: str = LEGACY_MARKETWATCH_URL, timeout: float = 15.0) -> None:
+    def __init__(self, url: str = LEGACY_MARKETWATCH_URL, timeout: float = 10.0) -> None:
         self.url = url
         self.timeout = timeout
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": "Mozilla/5.0", "Accept": "text/plain,text/*,*/*"})
+        self._cached_rows: dict[str, list[str]] | None = None
 
-    def snapshot(self, symbol: str) -> MarketSnapshot:
+    def _rows(self) -> dict[str, list[str]]:
+        if self._cached_rows is not None:
+            return self._cached_rows
         response = self.session.get(self.url, timeout=self.timeout)
         response.raise_for_status()
         text = response.content.decode("utf-8", errors="ignore")
         parts = text.split("@")
         if len(parts) < 3:
             raise ValueError("legacy MarketWatchPlus response has no price section")
+        rows: dict[str, list[str]] = {}
         for raw in parts[2].split(";"):
             fields = raw.split(",")
-            if len(fields) < 23:
-                continue
-            if fields[2].strip() != symbol:
-                continue
-            observed_at = datetime.now(timezone.utc)
-            data_date = observed_at.astimezone().strftime("%Y%m%d")
-            price = _number(fields[6])
-            previous = _number(fields[13])
-            if price is None:
-                raise ValueError(f"legacy closing price missing for {symbol}")
-            return MarketSnapshot(
-                symbol=symbol, observed_at=observed_at, price=price,
-                previous_close=previous, volume=_number(fields[9]),
-                high=_number(fields[12]), low=_number(fields[11]),
-                source="tsetmc-legacy-marketwatch", market_status="CLOSED", data_date=data_date,
-            )
-        raise ValueError(f"legacy MarketWatchPlus has no row for {symbol}")
+            if len(fields) >= 23 and fields[2].strip():
+                rows[fields[2].strip()] = fields
+        if not rows:
+            raise ValueError("legacy MarketWatchPlus returned no instrument rows")
+        self._cached_rows = rows
+        return rows
+
+    def snapshot(self, symbol: str) -> MarketSnapshot:
+        fields = self._rows().get(symbol)
+        if fields is None:
+            raise ValueError(f"legacy MarketWatchPlus has no row for {symbol}")
+        observed_at = datetime.now(timezone.utc)
+        data_date = observed_at.astimezone().strftime("%Y%m%d")
+        price = _number(fields[6])
+        previous = _number(fields[13])
+        if price is None:
+            raise ValueError(f"legacy closing price missing for {symbol}")
+        return MarketSnapshot(
+            symbol=symbol, observed_at=observed_at, price=price,
+            previous_close=previous, volume=_number(fields[9]),
+            high=_number(fields[12]), low=_number(fields[11]),
+            source="tsetmc-legacy-marketwatch", market_status="CLOSED", data_date=data_date,
+        )
 
 
 def _number(value: Any) -> float | None:
