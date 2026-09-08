@@ -20,16 +20,10 @@ def _status_payload(report: dict[str, Any]) -> dict[str, Any]:
         "health_status": report.get("health_status"),
         "report": {"fresh": meta.get("fresh"), "age_seconds": meta.get("age_seconds"), "max_age_seconds": meta.get("max_age_seconds"), "path": meta.get("path")},
         "market_session": report.get("market_session"), "market_status": intelligence.get("market_status"),
-        "market_regime": intelligence.get("regime"), "market_score": intelligence.get("score"),
-        "data_quality": intelligence.get("data_quality"),
-        "live_market": {"status": live_market.get("status", "NOT_CONFIGURED"), "provider": live_market.get("provider"),
-            "requested_symbols": live_market.get("requested_symbols", []), "actionable_count": live_market.get("actionable_count", 0),
-            "signals": live_market.get("signals", []), "errors": live_market.get("errors", [])},
-        "central_bank": {"ingestion_status": central_bank.get("ingestion_status"), "indicator_count": central_bank.get("indicator_count"),
-            "monetary_impulse": central_bank.get("monetary_impulse"), "monetary_policy_index": central_bank.get("monetary_policy_index"),
-            "stored_observation_count": central_bank.get("stored_observation_count")},
-        "portfolio": {"capital": portfolio.get("capital"), "equity": portfolio.get("equity"), "current_exposure": portfolio.get("current_exposure"),
-            "current_risk": portfolio.get("current_risk"), "drawdown": portfolio.get("drawdown")},
+        "market_regime": intelligence.get("regime"), "market_score": intelligence.get("score"), "data_quality": intelligence.get("data_quality"),
+        "live_market": {"status": live_market.get("status", "NOT_CONFIGURED"), "provider": live_market.get("provider"), "requested_symbols": live_market.get("requested_symbols", []), "actionable_count": live_market.get("actionable_count", 0), "signals": live_market.get("signals", []), "errors": live_market.get("errors", [])},
+        "central_bank": {"ingestion_status": central_bank.get("ingestion_status"), "indicator_count": central_bank.get("indicator_count"), "monetary_impulse": central_bank.get("monetary_impulse"), "monetary_policy_index": central_bank.get("monetary_policy_index"), "stored_observation_count": central_bank.get("stored_observation_count")},
+        "portfolio": {"capital": portfolio.get("capital"), "equity": portfolio.get("equity"), "current_exposure": portfolio.get("current_exposure"), "current_risk": portfolio.get("current_risk"), "drawdown": portfolio.get("drawdown")},
     }
 
 
@@ -41,6 +35,16 @@ def _load_fresh_report(report_path: str) -> dict[str, Any]:
     return report
 
 
+def _first_number(*values: Any) -> float | None:
+    for value in values:
+        try:
+            if value is not None:
+                return float(value)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
 def create_app(report_path: str | None = None) -> Any:
     resolved_report_path = report_path or os.getenv("IEA_REPORT_PATH", "health_report.json")
     try:
@@ -48,7 +52,7 @@ def create_app(report_path: str | None = None) -> Any:
     except ImportError as exc:  # pragma: no cover
         raise RuntimeError("FastAPI is required for the IEA API") from exc
 
-    app = FastAPI(title="IEA Assistant API", version="1.4.0")
+    app = FastAPI(title="IEA Assistant API", version="1.5.0")
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -92,35 +96,59 @@ def create_app(report_path: str | None = None) -> Any:
 
     @app.get("/stock/canslim")
     def stock_canslim(symbol: str) -> dict[str, Any]:
-        """Analyze a named Iran stock and explicitly report the data date.
-
-        Price/volume/session data comes from TSETMC. Fundamental CAN SLIM
-        criteria are marked unavailable until verified company/Codal data is
-        supplied; the endpoint never fills those fields with guesses.
+        """Full stock review: CAN SLIM, statements when available, valuation,
+        one-month price/volume behavior, real/legal money flow and major-holder changes.
+        Missing fundamental fields are explicit; no accounting values are guessed.
         """
         try:
-            snapshot = IranMarketProvider().snapshot(symbol)
-            near_high = None
-            if snapshot.high and snapshot.low and snapshot.high > snapshot.low:
-                near_high = snapshot.price >= snapshot.low + 0.8 * (snapshot.high - snapshot.low)
-            analysis = analyze_canslim(symbol=snapshot.symbol, data=CanSlimInput(
+            provider = IranMarketProvider()
+            data = provider.research_data(symbol, days=23)
+            instrument = data.get("instrument_info") or {}
+            one = data.get("one_month") or {}
+            flow = data.get("money_flow") or {}
+            holder = data.get("major_shareholder_change") or {}
+            daily = data.get("daily") or []
+            current = daily[0] if daily else {}
+            price = _first_number(current.get("pClosing"), current.get("pDrCotVal"))
+            high = _first_number(current.get("priceMax"))
+            low = _first_number(current.get("priceMin"))
+            near_high = None if price is None or high is None or low is None or high <= low else price >= low + .8 * (high - low)
+
+            # TSETMC exposes some market-watch valuation fields. Full accounting
+            # ratios remain unavailable until verified Codal statement ingestion.
+            analysis = analyze_canslim(symbol=data["symbol"], data=CanSlimInput(
                 price_near_high=near_high,
-                demand_score=None,
-                leader_score=None,
-                market_trend_score=None,
-                current_eps_growth_pct=None,
-                annual_eps_growth_pct=None,
-                new_catalyst=None,
-                institutional_sponsorship_score=None,
+                one_month_return_pct=one.get("return_pct"), one_month_high=one.get("high"), one_month_low=one.get("low"),
+                one_month_avg_volume=one.get("avg_volume"), volume_trend_pct=one.get("volume_trend_pct"),
+                net_real_money=flow.get("real_net_value"), net_legal_money=flow.get("legal_net_value"),
+                major_shareholder_change_pct=_first_number(holder.get("entries", [{}])[0].get("change") if holder.get("entries") else None),
+                pe=_first_number(instrument.get("pe"), instrument.get("pE")),
+                pb=_first_number(instrument.get("pb"), instrument.get("pB")),
+                ps=_first_number(instrument.get("ps"), instrument.get("pS")),
+                market_cap=_first_number(instrument.get("marketValue"), instrument.get("marketCap")),
+                sector_pe=_first_number(instrument.get("sectorPE"), instrument.get("sectorPe")),
+                current_eps_growth_pct=None, annual_eps_growth_pct=None, new_catalyst=None,
+                demand_score=None, leader_score=None, institutional_sponsorship_score=None, market_trend_score=None,
             ))
             analysis["market_data"] = {
-                "provider": "tsetmc", "data_date": snapshot.data_date,
-                "market_status": snapshot.market_status, "price": snapshot.price,
-                "previous_close": snapshot.previous_close, "observed_at": snapshot.observed_at.isoformat(),
+                "provider": "tsetmc", "data_date": data.get("data_date"), "price": price,
+                "market_status": "CLOSED" if not data.get("data_date") else "CLOSED",
             }
-            analysis["execution"] = "NO_TRADE" if snapshot.market_status == "CLOSED" else "LIVE_ELIGIBLE"
+            analysis["one_month_behavior"] = data.get("one_month")
+            analysis["money_flow"] = flow
+            analysis["major_shareholders"] = data.get("major_shareholders")
+            analysis["major_shareholder_change"] = holder
+            analysis["financial_statements"] = {
+                "status": "NOT_YET_INGESTED",
+                "required": [
+                    "income_statement", "balance_sheet", "cash_flow_statement", "quarterly_revenue_and_eps",
+                    "operating_margin", "net_margin", "roe", "roic", "debt_to_equity", "free_cash_flow",
+                    "working_capital", "receivables", "inventory", "capex", "dividend_history",
+                ],
+                "policy": "No fundamental value is fabricated; Codal ingestion is required before these fields affect the score.",
+            }
             return analysis
-        except (RuntimeError, ValueError, OSError) as exc:
+        except (RuntimeError, ValueError, OSError, KeyError) as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     @app.get("/answer")
@@ -140,7 +168,7 @@ app = create_app()
 def main() -> int:
     try:
         import uvicorn
-    except ImportError as exc:  # pragma: no cover
+    except ImportError as exc:
         raise RuntimeError("Uvicorn is required for the IEA API") from exc
     host = os.getenv("IEA_API_HOST", "0.0.0.0")
     port = int(os.getenv("PORT", os.getenv("IEA_API_PORT", "8000")))
