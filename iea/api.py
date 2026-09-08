@@ -41,7 +41,7 @@ def create_app(report_path: str | None = None) -> Any:
     try:
         from fastapi import FastAPI, HTTPException, Header
     except ImportError as exc: raise RuntimeError("FastAPI is required for the IEA API") from exc
-    app = FastAPI(title="IEA Assistant API", version="1.7.0")
+    app = FastAPI(title="IEA Assistant API", version="1.8.0")
 
     @app.get("/health")
     def health() -> dict[str, str]: return {"status": "ok", "service": "iea-assistant"}
@@ -81,18 +81,18 @@ def create_app(report_path: str | None = None) -> Any:
             price = _first_number(current.get("pClosing"), current.get("pDrCotVal")); high = _first_number(current.get("priceMax")); low = _first_number(current.get("priceMin"))
             near_high = None if price is None or high is None or low is None or high <= low else price >= low + .8 * (high - low)
             fundamentals = parse_financials(data.get("codal_filings") or [])
-            ratios = fundamentals["ratios"]; values = fundamentals["values"]
+            ratios = fundamentals["ratios"]; values = fundamentals["values"]; growth = fundamentals["growth"]
             analysis = analyze_canslim(symbol=data["symbol"], data=CanSlimInput(
                 price_near_high=near_high, one_month_return_pct=one.get("return_pct"), one_month_high=one.get("high"), one_month_low=one.get("low"),
                 one_month_avg_volume=one.get("avg_volume"), volume_trend_pct=one.get("volume_trend_pct"), net_real_money=flow.get("real_net_value"), net_legal_money=flow.get("legal_net_value"),
                 major_shareholder_change_pct=_first_number(holder.get("entries", [{}])[0].get("change") if holder.get("entries") else None),
                 pe=_first_number(instrument.get("pe"), instrument.get("pE")), pb=_first_number(instrument.get("pb"), instrument.get("pB")),
                 ps=_first_number(instrument.get("ps"), instrument.get("pS")), market_cap=_first_number(instrument.get("marketValue"), instrument.get("marketCap")),
-                sector_pe=_first_number(instrument.get("sectorPE"), instrument.get("sectorPe")), revenue_growth_pct=fundamentals["growth"]["revenue_growth_pct"],
+                sector_pe=_first_number(instrument.get("sectorPE"), instrument.get("sectorPe")), revenue_growth_pct=growth["revenue_growth_pct"],
                 gross_margin_pct=ratios["gross_margin_pct"], operating_margin_pct=ratios["operating_margin_pct"], net_margin_pct=ratios["net_margin_pct"],
                 free_cash_flow=ratios["free_cash_flow"], operating_cash_flow=values["operating_cash_flow"], debt_to_equity=ratios["debt_to_equity"],
                 current_ratio=ratios["current_ratio"], roe_pct=ratios["roe_pct"], roic_pct=ratios["roic_pct"],
-                current_eps_growth_pct=fundamentals["growth"]["eps_growth_pct"], annual_eps_growth_pct=None))
+                current_eps_growth_pct=growth["eps_growth_pct"], annual_eps_growth_pct=growth["annual_eps_growth_pct"]))
             analysis["market_data"] = {"provider": "tsetmc", "data_date": data.get("data_date"), "price": price, "market_status": "CLOSED"}
             analysis["one_month_behavior"] = data.get("one_month"); analysis["money_flow"] = flow
             analysis["major_shareholders"] = data.get("major_shareholders"); analysis["major_shareholder_change"] = holder
@@ -101,7 +101,8 @@ def create_app(report_path: str | None = None) -> Any:
             analysis["financial_statements"] = fundamentals
             analysis["data_quality"] = {"tsetmc_market": True, "one_month_history": bool(data.get("daily")), "money_flow_history": bool(data.get("client_type_history")),
                 "major_shareholders": bool(data.get("major_shareholders")), "codal_metadata": bool(data.get("codal_filings")),
-                "fundamental_statement_values": fundamentals["status"] == "READY"}
+                "fundamental_statement_values": fundamentals["status"] == "READY", "multi_period_fundamentals": len(fundamentals.get("periods") or []) >= 2,
+                "annual_fundamentals": bool(fundamentals["growth"].get("annual_eps_growth_pct") is not None or fundamentals["growth"].get("annual_revenue_growth_pct") is not None)}
             return analysis
         except (RuntimeError, ValueError, OSError, KeyError) as exc: raise HTTPException(status_code=502, detail=str(exc)) from exc
 
