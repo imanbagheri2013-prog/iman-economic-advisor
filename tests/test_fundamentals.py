@@ -31,13 +31,14 @@ def test_parse_financials_calculates_core_ratios():
 
 def test_parse_financials_calculates_sequential_growth():
     payload = [
-        {"period": "2026 Q2", "revenue": 1200, "eps": 30, "net_income": 180},
-        {"period": "2025 Q2", "revenue": 1000, "eps": 20, "net_income": 120},
+        {"period": "2026 Q2", "revenue": 1200, "eps": 30, "net_income": 180, "assets": 1800},
+        {"period": "2025 Q2", "revenue": 1000, "eps": 20, "net_income": 120, "assets": 1500},
     ]
     result = parse_financials(payload)
     assert result["growth"]["revenue_growth_pct"] == 20.0
     assert result["growth"]["eps_growth_pct"] == 50.0
     assert result["growth"]["net_income_growth_pct"] == 50.0
+    assert result["growth"]["asset_growth_pct"] == 20.0
 
 
 def test_parse_financials_calculates_explicit_annual_growth():
