@@ -18,20 +18,20 @@ def _status_payload(report: dict[str, Any]) -> dict[str, Any]:
 
 def _load_fresh_report(report_path: str) -> dict[str, Any]:
     report = load_report(report_path); meta = report.get("report_meta") or {}
-    if meta.get("fresh") is not True: raise RuntimeError("IEA trusted report is stale; refresh the scheduler before requesting an answer")
+    if meta.get("fresh") is not True: raise ValueError("IEA trusted report is stale")
     return report
 
 
 def _first_number(*values: Any) -> float | None:
     for value in values:
-        try:
-            if value is not None: return float(value)
-        except (TypeError, ValueError): pass
+        if value is None or value == "": continue
+        try: return float(str(value).replace(",", ""))
+        except (TypeError, ValueError): continue
     return None
 
 
 def _clip(value: float, low: float = 0.0, high: float = 100.0) -> float:
-    return round(max(low, min(high, value)), 2)
+    return max(low, min(high, value))
 
 
 def _signed_flow_score(flow: dict[str, Any], prefix: str) -> float | None:
@@ -69,12 +69,21 @@ def _flow_composite(flow: dict[str, Any]) -> float | None:
 
 
 def _composite_score(analysis: dict[str, Any], flow: dict[str, Any]) -> dict[str, Any]:
-    """Combine fundamental quality, CAN SLIM and money flow only when each input is observed."""
-    components = [(analysis.get("fundamental_quality_score"), 0.50), (analysis.get("score"), 0.30), (_flow_composite(flow), 0.20)]
-    available = [(v, w) for v, w in components if v is not None]
-    if not available: return {"score": None, "coverage_pct": 0.0, "complete": False, "missing_components": [n for n, (v, _) in zip(("fundamental", "canslim", "money_flow"), components) if v is None]}
+    """Combine fundamental quality, CAN SLIM and money flow from complete observed components only."""
+    fundamental = analysis.get("fundamental_quality_score")
+    canslim = analysis.get("score")
+    real_flow = _signed_flow_score(flow, "real")
+    legal_flow = _signed_flow_score(flow, "legal")
+    # Money-flow is a composite component: require both real and legal channels
+    # before counting its 20% weight. A partial flow observation remains diagnostic
+    # but must not inflate composite coverage.
+    money_flow = _flow_composite(flow) if real_flow is not None and legal_flow is not None else None
+    components = [("fundamental", fundamental, 0.50), ("canslim", canslim, 0.30), ("money_flow", money_flow, 0.20)]
+    available = [(v, w) for _, v, w in components if v is not None]
+    missing = [name for name, v, _ in components if v is None]
+    if not available:
+        return {"score": None, "coverage_pct": 0.0, "complete": False, "missing_components": missing, "weights": {"fundamental": 0.50, "canslim": 0.30, "money_flow": 0.20}, "method": "weighted observed components; unavailable inputs excluded, never imputed"}
     total_w = sum(w for _, w in available); score = sum(float(v) * w for v, w in available) / total_w
-    missing = [n for n, (v, _) in zip(("fundamental", "canslim", "money_flow"), components) if v is None]
     return {"score": round(score, 2), "coverage_pct": round(total_w * 100, 2), "complete": not missing, "missing_components": missing, "weights": {"fundamental": 0.50, "canslim": 0.30, "money_flow": 0.20}, "method": "weighted observed components; unavailable inputs excluded, never imputed"}
 
 
@@ -125,7 +134,7 @@ def create_app(report_path: str | None = None) -> Any:
             analysis = analyze_canslim(symbol=data["symbol"], data=CanSlimInput(
                 new_catalyst=catalysts["new_catalyst"], price_near_high=near_high, demand_score=market_scores["S"], leader_score=market_scores["L"], institutional_sponsorship_score=market_scores["I"], market_trend_score=market_scores["M"], market_benchmark_return_pct=market_return, sector_benchmark_return_pct=sector_return,
                 one_month_return_pct=one.get("return_pct"), one_month_high=one.get("high"), one_month_low=one.get("low"), one_month_avg_volume=one.get("avg_volume"), volume_trend_pct=one.get("volume_trend_pct"), net_real_money=flow.get("real_net_value"), net_legal_money=flow.get("legal_net_value"), major_shareholder_change_pct=_first_number(holder.get("entries", [{}])[0].get("change") if holder.get("entries") else None),
-                pe=_first_number(instrument.get("pe"), instrument.get("pE")), forward_pe=_first_number(instrument.get("forwardPE"), instrument.get("forwardPe")), pb=_first_number(instrument.get("pb"), instrument.get("pB")), ps=_first_number(instrument.get("ps"), instrument.get("pS")), ev_ebitda=_first_number(instrument.get("evEbitda"), instrument.get("evEBITDA")), ev_sales=_first_number(instrument.get("evSales")), market_cap=_first_number(instrument.get("marketValue"), instrument.get("marketCap")), enterprise_value=_first_number(instrument.get("enterpriseValue")), sector_pe=_first_number(instrument.get("sectorPE"), instrument.get("sectorPe")), sector_pb=_first_number(instrument.get("sectorPB"), instrument.get("sectorPb")), sector_ps=_first_number(instrument.get("sectorPS"), instrument.get("sectorPs")), sector_ev_ebitda=_first_number(instrument.get("sectorEVEBITDA"), instrument.get("sectorEvEbitda")), sector_ev_sales=_first_number(instrument.get("sectorEVSales"), instrument.get("sectorEvSales")), dividend_yield_pct=_first_number(instrument.get("dividendYield"), instrument.get("dividendYieldPct")),
+                pe=_first_number(instrument.get("pe"), instrument.get("pE")), forward_pe=_first_number(instrument.get("forwardPE"), instrument.get("forwardPe")), pb=_first_number(instrument.get("pb"), instrument.get("pB")), ps=_first_number(instrument.get("ps"), instrument.get("pS")), ev_ebitda=_first_number(instrument.get("evEbitda"), instrument.get("evEBITDA")), ev_sales=_first_number(instrument.get("evSales")), market_cap=_first_number(instrument.get("marketValue"), instrument.get("marketCap")), enterprise_value=_first_number(instrument.get("enterpriseValue")), sector_pe=_first_number(instrument.get("sectorPE"), instrument.get("sectorPe")), sector_pb=_first_number(instrument.get("sectorPB"), instrument.get("sectorPb")), sector_ps=_first_number(instrument.get("sectorPS"), instrument.get("sectorPs")), sector_ev_ebitda=_first_number(instrument.get("sectorEVEBITDA"), instrument.get("sectorEvEbitda")), sector_ev_sales=_first_number(instrument.get("sectorEVSales")), dividend_yield_pct=_first_number(instrument.get("dividendYield"), instrument.get("dividendYieldPct")),
                 revenue_growth_pct=growth["revenue_growth_pct"], gross_margin_pct=ratios["gross_margin_pct"], operating_margin_pct=ratios["operating_margin_pct"], net_margin_pct=ratios["net_margin_pct"], free_cash_flow=ratios["free_cash_flow"], operating_cash_flow=values["operating_cash_flow"], debt_to_equity=ratios["debt_to_equity"], current_ratio=ratios["current_ratio"], roe_pct=ratios["roe_pct"], roic_pct=ratios["roic_pct"], asset_growth_pct=growth["asset_growth_pct"], current_eps_growth_pct=growth["eps_growth_pct"], annual_eps_growth_pct=growth["annual_eps_growth_pct"]))
             analysis["market_data"] = {"provider": "tsetmc", "data_date": data.get("data_date"), "price": price, "market_status": "CLOSED"}
             analysis["canslim_market_context"] = market_scores; analysis["benchmark_configuration"] = {"market_index_symbol_configured": bool(market_benchmark_symbol), "sector_benchmark_symbol_configured": bool(sector_benchmark_symbol)}
