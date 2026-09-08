@@ -26,7 +26,13 @@ def _text(row: dict[str, Any]) -> str:
 
 
 def detect_catalysts(rows: list[dict[str, Any]] | None, max_items: int = 10) -> dict[str, Any]:
-    """Classify recent Codal metadata as a catalyst signal without inventing facts."""
+    """Classify recent Codal metadata conservatively without inventing facts.
+
+    Negative evidence takes precedence within a single filing. This prevents
+    generic positive words such as ``تولید`` from masking phrases like
+    ``کاهش تولید`` or ``توقف تولید``. Across filings, positive and negative
+    evidence remains mixed and therefore fail-closed.
+    """
     rows = [r for r in (rows or []) if isinstance(r, dict)]
     positive: list[dict[str, Any]] = []
     negative: list[dict[str, Any]] = []
@@ -36,14 +42,19 @@ def detect_catalysts(rows: list[dict[str, Any]] | None, max_items: int = 10) -> 
             continue
         pos = [term for term in POSITIVE_TERMS if term.lower() in text]
         neg = [term for term in NEGATIVE_TERMS if term.lower() in text]
-        item = {"date": row.get("date") or row.get("publishDate") or row.get("dEven"), "title": row.get("title") or row.get("subject") or row.get("reportTitle") or row.get("letterTitle"), "positive_matches": pos, "negative_matches": neg}
-        if pos and not neg:
-            positive.append(item)
-        elif neg and not pos:
+        item = {
+            "date": row.get("date") or row.get("publishDate") or row.get("dEven"),
+            "title": row.get("title") or row.get("subject") or row.get("reportTitle") or row.get("letterTitle"),
+            "positive_matches": pos,
+            "negative_matches": neg,
+        }
+        if neg:
             negative.append(item)
+        elif pos:
+            positive.append(item)
     status = "positive" if positive and not negative else ("negative" if negative and not positive else ("mixed" if positive or negative else "unavailable"))
     return {
-        "new_catalyst": True if positive else (False if negative and not positive else None),
+        "new_catalyst": True if positive and not negative else (False if negative and not positive else None),
         "status": status,
         "positive_count": len(positive),
         "negative_count": len(negative),
