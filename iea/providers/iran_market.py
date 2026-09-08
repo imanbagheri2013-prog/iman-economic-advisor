@@ -123,7 +123,7 @@ class IranMarketProvider:
             "data_date": _date_string(daily[0].get("dEven")) if daily else None, "daily": daily,
             "client_type_history": client_history, "major_shareholders": shareholders,
             "codal_filings": codal, "statement_content": statement_content, "share_changes": share_changes,
-            "one_month": {"observations": len(daily), "return_pct": ((newest_price / oldest_price) - 1) * 100 if oldest_price and newest_price else None,
+            "one_month": {"observations": len(daily), "return_pct": round(((newest_price / oldest_price) - 1) * 100, 4) if oldest_price and newest_price else None,
                 "high": max(prices) if prices else None, "low": min(prices) if prices else None,
                 "avg_volume": avg_volume, "latest_volume": volumes[0] if volumes else None,
                 "volume_trend_pct": ((volumes[0] / avg_volume) - 1) * 100 if volumes and avg_volume else None},
