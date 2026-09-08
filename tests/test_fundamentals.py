@@ -39,6 +39,18 @@ def test_parse_financials_calculates_sequential_growth():
     assert result["growth"]["eps_growth_pct"] == 50.0
     assert result["growth"]["net_income_growth_pct"] == 50.0
     assert result["growth"]["asset_growth_pct"] == 20.0
+    assert result["growth"]["yoy_revenue_growth_pct"] == 20.0
+
+
+def test_parse_financials_calculates_qoq_growth():
+    payload = [
+        {"period": "2026 Q2", "revenue": 1200, "eps": 30, "net_income": 180},
+        {"period": "2026 Q1", "revenue": 1000, "eps": 20, "net_income": 150},
+    ]
+    result = parse_financials(payload)
+    assert result["growth"]["qoq_revenue_growth_pct"] == 20.0
+    assert result["growth"]["qoq_eps_growth_pct"] == 50.0
+    assert result["growth"]["qoq_net_income_growth_pct"] == 20.0
 
 
 def test_parse_financials_calculates_explicit_annual_growth():
@@ -50,6 +62,29 @@ def test_parse_financials_calculates_explicit_annual_growth():
     assert result["growth"]["annual_revenue_growth_pct"] == 25.0
     assert result["growth"]["annual_eps_growth_pct"] == 33.3333333333
     assert result["growth"]["annual_net_income_growth_pct"] == 33.3333333333
+
+
+def test_parse_financials_calculates_true_roic_and_net_debt_when_inputs_exist():
+    payload = [{
+        "period": "2026 Q2",
+        "operating_profit": 200,
+        "tax_expense": 40,
+        "total_debt": 500,
+        "cash": 100,
+        "equity": 600,
+    }]
+    result = parse_financials(payload)
+    assert result["ratios"]["net_debt"] == 400
+    assert result["ratios"]["invested_capital"] == 1000
+    assert result["ratios"]["roic_pct"] == 16.0
+    assert result["quality_flags"]["roic_available"] is True
+    assert result["quality_flags"]["roic_is_proxy"] is False
+
+
+def test_parse_financials_requires_capex_for_free_cash_flow():
+    result = parse_financials([{"operating_cash_flow": 160}])
+    assert result["ratios"]["free_cash_flow"] is None
+    assert result["ratios"]["free_cash_flow_margin_pct"] is None
 
 
 def test_parse_financials_never_invents_missing_values():
