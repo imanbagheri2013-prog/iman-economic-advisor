@@ -6,6 +6,8 @@ def test_canslim_does_not_invent_missing_fundamentals():
     assert result["action"] == "WAIT"
     assert set(result["missing_criteria"]) >= {"C", "A", "N", "S", "L", "I", "M"}
     assert result["fundamental_score"] is None
+    assert result["fundamental_quality_score"] is None
+    assert result["fundamental_confidence_pct"] == 0.0
     assert result["fundamental_score_complete"] is False
 
 
@@ -45,9 +47,21 @@ def test_fundamental_score_is_weighted_and_complete_when_all_metrics_exist():
         ),
     )
     assert result["fundamental_score"] == 100.0
+    assert result["fundamental_quality_score"] == 100.0
     assert result["fundamental_score_coverage_pct"] == 100.0
+    assert result["fundamental_confidence_pct"] == 100.0
     assert result["fundamental_score_complete"] is True
     assert result["fundamental_missing_metrics"] == []
+
+
+def test_fundamental_score_is_discounted_by_low_coverage():
+    result = analyze_canslim("TEST", CanSlimInput(roe_pct=20, roic_pct=12))
+    assert result["fundamental_quality_score"] == 100.0
+    assert result["fundamental_score"] == 26.09
+    assert result["fundamental_score_coverage_pct"] == 26.09
+    assert result["fundamental_confidence_pct"] == 26.09
+    assert result["fundamental_score_complete"] is False
+    assert "revenue_growth_pct" in result["fundamental_missing_metrics"]
 
 
 def test_valuation_diagnostics_compare_pe_with_sector_without_inventing_values():
@@ -55,11 +69,3 @@ def test_valuation_diagnostics_compare_pe_with_sector_without_inventing_values()
     assert result["valuation_diagnostics"]["pe_vs_sector"] == 0.6
     assert result["valuation_diagnostics"]["pe_discount_pct"] == 40.0
     assert "pe_discount_to_sector" in result["valuation_diagnostics"]["flags"]
-
-
-def test_fundamental_score_reports_partial_coverage():
-    result = analyze_canslim("TEST", CanSlimInput(roe_pct=20, roic_pct=12))
-    assert result["fundamental_score"] == 100.0
-    assert result["fundamental_score_coverage_pct"] < 100.0
-    assert result["fundamental_score_complete"] is False
-    assert "revenue_growth_pct" in result["fundamental_missing_metrics"]
