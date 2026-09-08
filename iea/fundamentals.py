@@ -16,7 +16,7 @@ ALIASES: dict[str, tuple[str, ...]] = {
     "current_liabilities": ("current_liabilities", "current liabilities", "بدهی های جاری", "بدهی‌های جاری"),
     "total_debt": ("total debt", "total_debt", "debt", "borrowings", "بدهی مالی", "جمع بدهی های مالی", "تسهیلات مالی"),
     "cash": ("cash", "cash and cash equivalents", "cash equivalents", "وجه نقد", "موجودی نقد", "وجه نقد و معادل نقد"),
-    "tax_expense": ("tax expense", "income tax", "tax", "مالیات بر درآمد", "هزینه مالیات بر درآمد"),
+    "tax_expense": ("tax_expense", "tax expense", "income tax", "tax", "مالیات بر درآمد", "هزینه مالیات بر درآمد"),
     "operating_cash_flow": ("operating_cash_flow", "cash from operations", "operating cash", "جریان نقد عملیاتی", "خالص جریان های نقدی حاصل از فعالیت های عملیاتی"),
     "capex": ("capex", "capital expenditure", "capital expenditures", "خرید دارایی ثابت", "مخارج سرمایه ای"),
     "dividend": ("dividend", "dividend per share", "سود تقسیمی", "سود نقدی هر سهم"),
@@ -243,5 +243,5 @@ def parse_financials(payload: Any) -> dict[str, Any]:
             "roic_is_proxy": true_roic is None,
             "fcf_requires_capex": True,
         },
-        "policy": "Only unambiguous statement-line values are used. Missing or ambiguous values stay None. YoY requires matching quarters from adjacent fiscal years; QoQ requires identifiable consecutive quarters. True ROIC requires operating profit, tax expense, debt, equity and cash; otherwise only the proxy is reported. FCF requires both operating cash flow and CapEx.",
+        "policy": "Only unambiguous statement-line values are used. Missing inputs remain unavailable rather than being synthesized.",
     }
