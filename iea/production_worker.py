@@ -36,6 +36,7 @@ def _configure_runtime_paths(runtime_dir: Path) -> None:
     # mutable runtime state on the Railway volume instead.
     os.environ.setdefault("IEA_DB_PATH", str(runtime_dir / "iea.sqlite3"))
     os.environ.setdefault("IEA_REPORT_PATH", str(runtime_dir / "health_report.json"))
+    os.environ.setdefault("IEA_MARKET_STATE_PATH", str(runtime_dir / "iran_market_state.json"))
 
 
 def main() -> int:
