@@ -19,7 +19,8 @@ from .health import check_all, overall_status
 from .iran_market import IranMarketAdapter
 from .market_intelligence import analyze_snapshots
 from .pipeline import load_config, pull_and_check
-from .providers.iran_market import IranMarketProvider, configured_iran_symbols
+from .providers.iran_market import configured_iran_symbols
+from .providers.iran_market_mirror import FallbackIranMarketProvider, IranMarketMirrorProvider
 from .providers.market import YahooChartProvider, configured_symbols
 from .runtime import load_equity_payload
 
@@ -42,9 +43,6 @@ def _publish_report(payload: dict) -> None:
         return
     if not token:
         raise RuntimeError("IEA_REPORT_SINK_TOKEN is required when IEA_REPORT_SINK_URL is configured")
-    # Railway commonly supplies an internal service domain without a scheme.
-    # requests requires an absolute URL, so normalize the configured sink while
-    # preserving explicit http/https configuration.
     url = url.strip()
     if not url.lower().startswith(("http://", "https://")):
         url = f"https://{url}"
@@ -101,13 +99,23 @@ def _closed_market_intelligence(market_status: str, session_date: str) -> dict:
     return snapshot
 
 
+def _iran_market_provider():
+    """Production must use the Railway-safe GitHub mirror, never direct TSETMC."""
+    mode = os.getenv("IEA_IRAN_MARKET_PROVIDER", "mirror").strip().lower()
+    if mode == "direct":
+        raise RuntimeError("Direct TSETMC provider is disabled in production; use IEA_IRAN_MARKET_PROVIDER=mirror")
+    if mode != "mirror":
+        raise RuntimeError(f"Unsupported IEA_IRAN_MARKET_PROVIDER={mode!r}; expected 'mirror'")
+    return IranMarketMirrorProvider()
+
+
 def _live_market_intelligence(market_status: str) -> dict:
-    """Fetch Iran symbols from TSETMC even after close; closed data is analysis-only."""
+    """Fetch Iran symbols from the Railway-safe mirror; never block on direct TSETMC."""
     iran_symbols = configured_iran_symbols()
-    provider_name = "tsetmc"
+    provider_name = "tsetmc-github-actions"
     if iran_symbols:
         symbols = iran_symbols
-        provider = IranMarketProvider()
+        provider = _iran_market_provider()
     else:
         symbols = configured_symbols()
         provider = YahooChartProvider()
