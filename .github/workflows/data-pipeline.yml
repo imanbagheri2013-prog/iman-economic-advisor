@@ -54,3 +54,5 @@ jobs:
           name: data-health-report
           path: health_report.json
           if-no-files-found: warn
+          include-hidden-files: false
+          retention-days: 14
