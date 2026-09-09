@@ -52,6 +52,9 @@ jobs:
           pip install -r requirements.txt
           pip install -e .
 
+      # A degraded market-data mirror is an expected health state while the
+      # upstream is unavailable. The scheduler itself already emits NO_TRADE
+      # and BLOCKED gates, so this step must not turn that into CI failure.
       - name: Run economic data scheduler
         id: run_scheduler
         continue-on-error: true
