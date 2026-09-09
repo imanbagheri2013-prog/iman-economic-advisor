@@ -60,30 +60,35 @@ jobs:
 
       - name: Fetch full Iran market universe
         id: fetch_market
-        continue-on-error: true
         run: |
           set +e
-          last_status=1
+          fetch_ok=false
+
           for attempt in 1 2 3; do
             echo "Iran market fetch attempt ${attempt}/3"
-            if python scripts/publish_iran_market_data.py; then
-              last_status=0
+            python scripts/publish_iran_market_data.py
+            rc=$?
+
+            if [ "$rc" -eq 0 ]; then
+              fetch_ok=true
               break
             fi
-            last_status=$?
+
+            echo "Iran market fetch attempt ${attempt} failed with exit code ${rc}."
             if [ "$attempt" -lt 3 ]; then
               sleep $((attempt * 15))
             fi
           done
 
-          if [ "$last_status" -eq 0 ]; then
+          if [ "$fetch_ok" = "true" ]; then
             echo "fetch_ok=true" >> "$GITHUB_OUTPUT"
             echo "Iran market full-universe fetch succeeded."
           else
             echo "fetch_ok=false" >> "$GITHUB_OUTPUT"
             echo "::warning::Iran market upstreams were unavailable; preserving the last valid mirror. Data Health must treat this snapshot as stale."
           fi
-          exit "$last_status"
+
+          exit 0
 
       - name: Verify full-universe mirror payload
         if: steps.fetch_market.outputs.fetch_ok == 'true'
