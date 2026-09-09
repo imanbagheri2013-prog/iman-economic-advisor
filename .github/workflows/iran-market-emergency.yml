@@ -1,0 +1,76 @@
+name: IEA Iran Full-Market Emergency
+
+on:
+  push:
+    paths:
+      - ".github/workflows/iran-market-emergency.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          ref: main
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - run: python -m pip install requests
+
+      - name: Fetch Full-Market directly through resilient proxy
+        run: |
+          set -e
+          for attempt in 1 2 3; do
+            echo "Emergency proxy attempt ${attempt}/3"
+            if python scripts/fetch_iran_market_via_proxy.py; then
+              exit 0
+            fi
+            [ "$attempt" -lt 3 ] && sleep $((attempt * 10))
+          done
+          exit 1
+
+      - name: Verify Full-Market
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from datetime import datetime, timezone
+          data=json.loads(Path('data/iran_market_live.json').read_text(encoding='utf-8'))
+          symbols=data.get('symbols') or {}
+          assert data.get('universe_mode') == 'FULL_MARKET'
+          assert len(symbols) >= 1000
+          assert int(data.get('universe_count', 0)) == len(symbols)
+          ts=datetime.fromisoformat(data['generated_at'].replace('Z','+00:00'))
+          age=(datetime.now(timezone.utc)-ts).total_seconds()
+          assert 0 <= age <= 1200
+          for symbol,row in symbols.items():
+              info=row.get('instrument_info') or {}
+              assert info.get('pClosing') is not None, symbol
+              assert info.get('pDrCotVal') is not None, symbol
+              assert info.get('priceYesterday') is not None, symbol
+          print(f'EMERGENCY FULL-MARKET VERIFIED: {len(symbols)} symbols; age={age:.1f}s')
+          PY
+
+      - name: Publish Full-Market mirror
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          cp data/iran_market_live.json "$RUNNER_TEMP/iran_market_live.json"
+          git fetch origin market-data
+          git checkout -B market-data origin/market-data
+          mkdir -p data
+          cp "$RUNNER_TEMP/iran_market_live.json" data/iran_market_live.json
+          git add data/iran_market_live.json
+          git commit -m "Publish verified Full-Market mirror" || true
+          git push origin HEAD:market-data --force
