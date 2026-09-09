@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from iea.health import check_series, overall_status
 from iea.models import Observation
@@ -95,6 +95,52 @@ def test_check_series_not_found(tmp_path):
         assert result["record_count"] == 0
         assert result["missing_count"] == 0
         assert result["status"] == "CRITICAL"
+
+    finally:
+        store.close()
+
+
+def test_bls_monthly_series_becomes_warning_after_two_months(tmp_path):
+    store = make_store(tmp_path)
+
+    try:
+        old_date = (datetime.now(timezone.utc) - timedelta(days=70)).date()
+        store.upsert(
+            make_observation(
+                "bls",
+                "CUUR0000SA0",
+                100.0,
+                old_date,
+            )
+        )
+
+        result = check_series(store, "bls", "CUUR0000SA0")
+
+        assert result["freshness_warning_days"] == 60
+        assert result["status"] == "WARNING"
+
+    finally:
+        store.close()
+
+
+def test_fred_daily_series_warns_after_business_week_gap(tmp_path):
+    store = make_store(tmp_path)
+
+    try:
+        old_date = (datetime.now(timezone.utc) - timedelta(days=8)).date()
+        store.upsert(
+            make_observation(
+                "fred",
+                "DGS10",
+                4.0,
+                old_date,
+            )
+        )
+
+        result = check_series(store, "fred", "DGS10")
+
+        assert result["freshness_warning_days"] == 7
+        assert result["status"] == "WARNING"
 
     finally:
         store.close()
