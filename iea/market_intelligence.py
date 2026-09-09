@@ -51,6 +51,10 @@ class MarketSignal:
     analysis_action: str = "NO_TRADE"
     market_status: str = "OPEN"
     data_date: str | None = None
+    entry_price: float | None = None
+    stop_loss: float | None = None
+    take_profit: float | None = None
+    risk_reward: float | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -66,6 +70,10 @@ class MarketSignal:
             "analysis_action": self.analysis_action,
             "market_status": self.market_status,
             "data_date": self.data_date,
+            "entry_price": self.entry_price,
+            "stop_loss": self.stop_loss,
+            "take_profit": self.take_profit,
+            "risk_reward": self.risk_reward,
         }
 
 
@@ -73,6 +81,28 @@ def _pct_change(price: float, previous: Optional[float]) -> Optional[float]:
     if previous is None or previous <= 0:
         return None
     return ((price - previous) / previous) * 100.0
+
+
+def _risk_levels(snapshot: MarketSnapshot, analysis_action: str) -> tuple[float | None, float | None, float | None, float | None]:
+    """Build conservative 2R levels for an otherwise actionable signal."""
+    if analysis_action not in {"BUY", "SELL"} or snapshot.price <= 0:
+        return None, None, None, None
+
+    entry = float(snapshot.price)
+    fallback_risk = entry * 0.02
+
+    if analysis_action == "BUY":
+        structural_risk = entry - snapshot.low if snapshot.low is not None and 0 < snapshot.low < entry else None
+        risk = structural_risk if structural_risk and structural_risk >= fallback_risk else fallback_risk
+        stop = entry - risk
+        target = entry + (2.0 * risk)
+    else:
+        structural_risk = snapshot.high - entry if snapshot.high is not None and snapshot.high > entry else None
+        risk = structural_risk if structural_risk and structural_risk >= fallback_risk else fallback_risk
+        stop = entry + risk
+        target = entry - (2.0 * risk)
+
+    return round(entry, 4), round(stop, 4), round(target, 4), 2.0
 
 
 def analyze_snapshot(snapshot: MarketSnapshot) -> MarketSignal:
@@ -133,6 +163,7 @@ def analyze_snapshot(snapshot: MarketSnapshot) -> MarketSignal:
     else:
         analysis_action, state = "WAIT", "NEUTRAL"
 
+    entry_price, stop_loss, take_profit, risk_reward = _risk_levels(snapshot, analysis_action)
     executable_action = analysis_action if snapshot.fresh and snapshot.market_status != "CLOSED" else "NO_TRADE"
     if snapshot.market_status == "CLOSED":
         reasons.append("closed-market snapshot; analysis only, no live trade action")
@@ -146,7 +177,8 @@ def analyze_snapshot(snapshot: MarketSnapshot) -> MarketSignal:
         reasons=tuple(reasons), data_fresh=snapshot.fresh,
         observed_at=observed.isoformat(), source=snapshot.source,
         analysis_action=analysis_action, market_status=snapshot.market_status,
-        data_date=snapshot.data_date,
+        data_date=snapshot.data_date, entry_price=entry_price, stop_loss=stop_loss,
+        take_profit=take_profit, risk_reward=risk_reward,
     )
 
 
@@ -165,5 +197,6 @@ def analyze_snapshots(snapshots: Iterable[MarketSnapshot]) -> dict[str, Any]:
             "closed_market_action": "NO_TRADE",
             "suspended_symbol_action": "NO_TRADE",
             "missing_required_data_action": "NO_TRADE",
+            "risk_levels_action": "ADVISORY_ONLY",
         },
     }
