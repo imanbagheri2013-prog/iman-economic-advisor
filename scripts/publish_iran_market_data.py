@@ -14,8 +14,11 @@ import requests
 
 TINDEX_BASE = "https://tindex.app/stocks/"
 TSE_PUBLIC_JSON_URL = "https://tse.ir/json/MarketWatch/data_7.json"
-CDN_MARKETWATCH_URL = "https://cdn.tsetmc.com/api/ClosingPrice/GetMarketWatch"
+CDN_MARKETWATCH_URL = "https://cdn.tsetmc.com/api/ClosingPrice/GetMarketWatch?market=0&paperTypes%5B0%5D=1&paperTypes%5B1%5D=2&paperTypes%5B2%5D=3&paperTypes%5B3%5D=4&paperTypes%5B4%5D=5&paperTypes%5B5%5D=6&paperTypes%5B6%5D=7&paperTypes%5B7%5D=8&paperTypes%5B8%5D=9&showTraded=false&withBestLimits=false&hEven=0&RefID=0"
 LEGACY_MARKETWATCH_URL = "http://old.tsetmc.com/tsev2/data/MarketWatchPlus.aspx"
+LEGACY_MARKETWATCH_INIT_URL = "https://old.tsetmc.com/tsev2/data/MarketWatchInit.aspx?h=0&r=0"
+LEGACY_MARKETWATCH_INIT_HTTP_URL = "http://old.tsetmc.com/tsev2/data/MarketWatchInit.aspx?h=0&r=0"
+TSETMC_WWW_MARKETWATCH_URL = "https://www.tsetmc.com/tsev2/data/MarketWatchPlus.aspx"
 SYMBOLS = ["فولاد", "فملی", "شستا", "خودرو", "وبملت"]
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126 Safari/537.36", "Accept": "text/html,application/json,text/plain,*/*"}
 
@@ -77,7 +80,7 @@ def parse_tindex_history_text(text: str) -> tuple[float | None, str | None]:
 
 
 def fetch_tindex_history(session: requests.Session, symbol: str) -> tuple[float | None, str | None]:
-    response = session.get(TINDEX_BASE + quote(symbol, safe="") + "/history/", headers=HEADERS, timeout=(4, 8))
+    response = session.get(TINDEX_BASE + quote(symbol, safe="") + "/history/", headers=HEADERS, timeout=(15, 30))
     response.raise_for_status()
     return parse_tindex_history_text(html_text(response.text))
 
@@ -87,7 +90,7 @@ def fetch_tindex(requested: list[str]) -> tuple[dict[str, dict[str, Any]], str]:
     session = requests.Session()
     session.headers.update(HEADERS)
     for symbol in requested:
-        response = session.get(TINDEX_BASE + quote(symbol, safe="") + "/", headers=HEADERS, timeout=(4, 8))
+        response = session.get(TINDEX_BASE + quote(symbol, safe="") + "/", headers=HEADERS, timeout=(15, 30))
         response.raise_for_status()
         text = html_text(response.text)
         last_match = re.search(r"آخرین قیمت\s*([0-9۰-۹٬,]+)\s*ریال", text)
@@ -142,7 +145,7 @@ def parse_legacy(text: str) -> dict[str, dict[str, Any]]:
     for raw in parts[2].split(";"):
         f = raw.split(",")
         if len(f) >= 14 and f[2].strip():
-            rows[f[2].strip()] = {"l18": f[2].strip(), "pc": f[6], "py": f[13], "tvol": f[9], "pmin": f[11], "pmax": f[12]}
+            rows[f[2].strip()] = {"l18": f[2].strip(), "pc": f[6], "py": f[13], "tvol": f[9], "pmin": f[11], "pmax": f[12], "insCode": f[0]}
     if not rows:
         raise RuntimeError("legacy marketwatch has no rows")
     return rows
@@ -150,17 +153,19 @@ def parse_legacy(text: str) -> dict[str, dict[str, Any]]:
 
 def fetch_marketwatch(requested: list[str] | None = None) -> tuple[dict[str, dict[str, Any]], str]:
     failures: list[str] = []
-    targets = [(TSE_PUBLIC_JSON_URL, "tse-public-json"), (CDN_MARKETWATCH_URL, "tsetmc-cdn-direct"), (LEGACY_MARKETWATCH_URL, "tsetmc-legacy-direct")]
+    targets = [
+        (TSE_PUBLIC_JSON_URL, "tse-public-json"),
+        (CDN_MARKETWATCH_URL, "tsetmc-cdn-direct"),
+        (LEGACY_MARKETWATCH_INIT_URL, "tsetmc-marketwatch-init-https"),
+        (LEGACY_MARKETWATCH_INIT_HTTP_URL, "tsetmc-marketwatch-init-http"),
+        (LEGACY_MARKETWATCH_URL, "tsetmc-legacy-direct"),
+        (TSETMC_WWW_MARKETWATCH_URL, "tsetmc-www-direct"),
+    ]
     for url, source in targets:
         try:
-            response = requests.get(url, headers=HEADERS, timeout=(4, 10))
+            response = requests.get(url, headers=HEADERS, timeout=(15, 30))
             response.raise_for_status()
-            if source == "tse-public-json":
-                rows = parse_tse_public_json(response.text)
-            elif source == "tsetmc-cdn-direct":
-                rows = parse_cdn(response.text)
-            else:
-                rows = parse_legacy(response.text)
+            rows = parse_tse_public_json(response.text) if source == "tse-public-json" else parse_cdn(response.text) if source == "tsetmc-cdn-direct" else parse_legacy(response.text)
             if requested:
                 rows = {k: v for k, v in rows.items() if any(normalize_symbol(k) == normalize_symbol(s) for s in requested)}
             if rows:
