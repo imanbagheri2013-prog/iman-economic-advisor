@@ -149,12 +149,19 @@ def check_market_mirror_health(
         result["valid_symbol_count"] = len(result["valid_symbols"])
         result["analysis_ready_symbol_count"] = len(result["analysis_ready_symbols"])
 
+        symbol_stale_errors = [error for error in result["errors"] if error.startswith("symbol snapshot is stale:")]
+        other_errors = [error for error in result["errors"] if not error.startswith("symbol snapshot is stale:")]
         if stale:
             result["status"] = "CRITICAL"
-        elif result["errors"] or result["coverage"] < 1.0:
-            result["status"] = "CRITICAL" if result["analysis_ready_symbol_count"] == 0 else "WARNING"
         elif result["analysis_ready_symbol_count"] == 0:
             result["status"] = "CRITICAL"
+        elif other_errors or result["coverage"] < 1.0:
+            result["status"] = "WARNING"
+        elif symbol_stale_errors:
+            # An isolated stale symbol is excluded from analysis, but other
+            # healthy active symbols remain usable and should keep the mirror
+            # operationally healthy.
+            result["status"] = "HEALTHY"
         else:
             # Suspended symbols are validly represented but not analysis-ready;
             # they must not turn a healthy market snapshot red by themselves.
