@@ -17,11 +17,10 @@ from .equity_fundamentals import FundamentalSnapshot
 from .equity_sources import fetch_live_equity_input
 from .health import check_all, overall_status
 from .iran_market import IranMarketAdapter
-from .market_data_health import check_market_mirror_health
 from .market_intelligence import analyze_snapshots
 from .pipeline import load_config, pull_and_check
 from .providers.iran_market import configured_iran_symbols
-from .providers.iran_market_mirror import DEFAULT_MIRROR_URL, IranMarketMirrorProvider
+from .providers.iran_market_mirror import IranMarketMirrorProvider
 from .providers.market import YahooChartProvider, configured_symbols
 from .runtime import load_equity_payload
 
@@ -108,10 +107,6 @@ def _iran_market_provider():
     if mode != "mirror":
         raise RuntimeError(f"Unsupported IEA_IRAN_MARKET_PROVIDER={mode!r}; expected 'mirror'")
     return IranMarketMirrorProvider()
-
-
-def _market_mirror_url() -> str:
-    return os.getenv("IEA_IRAN_MARKET_MIRROR_URL", DEFAULT_MIRROR_URL).strip()
 
 
 def _live_market_intelligence(market_status: str, mirror_health: dict | None = None) -> dict:
@@ -278,12 +273,13 @@ def run() -> int:
     store = None
     try:
         config = load_config()
-        store, freshness_results, pipeline_status = _pull_with_retry()
+        store, pipeline_results, pipeline_status = _pull_with_retry()
         health_results = check_all(store)
-        mirror_health = None
-        iran_symbols = configured_iran_symbols()
-        if iran_symbols:
-            mirror_health = check_market_mirror_health(_market_mirror_url(), expected_symbols=iran_symbols)
+        mirror_health = next(
+            (item for item in pipeline_results if item.get("component") == "iran_market_mirror"),
+            None,
+        )
+        if mirror_health is not None:
             health_results.append(mirror_health)
         health_status = overall_status(health_results)
         capital = _capital_from_environment()
@@ -303,6 +299,7 @@ def run() -> int:
             status, exit_code = "ok", 0
         else:
             status, exit_code = "warning", 0
+        freshness_results = pipeline_results
         payload = {"started_at": started, "finished_at": datetime.now(timezone.utc).isoformat(), "status": status,
             "pipeline_status": pipeline_status, "health_status": health_status, "observations": store.count(),
             "central_bank_observations": store.count_central_bank(), "database": str(store.path),
