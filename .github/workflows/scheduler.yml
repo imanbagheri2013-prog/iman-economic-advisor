@@ -52,6 +52,38 @@ jobs:
           pip install -r requirements.txt
           pip install -e .
 
+      - name: Select Iran market universe
+        env:
+          IEA_MARKET_MIRROR_URL: "https://raw.githubusercontent.com/imanbagheri2013-prog/iman-economic-advisor/market-data/data/iran_market_live.json"
+        run: |
+          set -e
+          python - <<'PY'
+          import json
+          import os
+          from urllib.request import Request, urlopen
+
+          fallback = ["فولاد", "فملی", "شستا", "خودرو", "وبملت"]
+          url = os.environ["IEA_MARKET_MIRROR_URL"]
+          selected = fallback
+          try:
+              request = Request(url, headers={"Accept": "application/json", "User-Agent": "IEA-Scheduler/1.0"})
+              with urlopen(request, timeout=15) as response:
+                  payload = json.load(response)
+              symbols = payload.get("symbols") if isinstance(payload, dict) else None
+              mode = payload.get("universe_mode") if isinstance(payload, dict) else None
+              count = int(payload.get("universe_count") or len(symbols or {})) if isinstance(payload, dict) else 0
+              if mode == "FULL_MARKET" and isinstance(symbols, dict) and count >= 100 and count == len(symbols):
+                  selected = sorted(str(symbol).strip() for symbol in symbols if str(symbol).strip())
+                  print(f"Using FULL_MARKET universe: {len(selected)} symbols")
+              else:
+                  print(f"Full-market mirror not verified (mode={mode!r}, count={count}); using safe configured subset of {len(fallback)} symbols")
+          except Exception as exc:
+              print(f"Could not inspect market mirror ({type(exc).__name__}: {exc}); using safe configured subset of {len(fallback)} symbols")
+
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env_file:
+              env_file.write("IEA_IR_SYMBOLS=" + ",".join(selected) + "\n")
+          PY
+
       # A degraded market-data mirror is an expected health state while the
       # upstream is unavailable. The scheduler itself already emits NO_TRADE
       # and BLOCKED gates, so this step must not turn that into CI failure.
@@ -65,7 +97,6 @@ jobs:
           IEA_DB_PATH: "data/iea.sqlite3"
           IEA_CBI_DATA_URL: ${{ secrets.IEA_CBI_DATA_URL }}
           IEA_CAPITAL: ${{ vars.IEA_CAPITAL }}
-          IEA_IR_SYMBOLS: "فولاد,فملی,شستا,خودرو,وبملت"
           IEA_EQUITY_INPUT_PATH: "config/equity_input.json"
           IEA_EQUITY_SYMBOL: ${{ vars.IEA_EQUITY_SYMBOL }}
           IEA_EQUITY_PE_MULTIPLE: ${{ vars.IEA_EQUITY_PE_MULTIPLE }}
