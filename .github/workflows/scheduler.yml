@@ -53,6 +53,8 @@ jobs:
           pip install -e .
 
       - name: Run economic data scheduler
+        id: run_scheduler
+        continue-on-error: true
         env:
           FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
           BLS_START_YEAR: "2021"
@@ -78,7 +80,7 @@ jobs:
 
       - name: Validate market state before artifact upload
         id: validate-market-state
-        if: success() && hashFiles('iran_market_state.json') != ''
+        if: steps.run_scheduler.outcome == 'success' && hashFiles('iran_market_state.json') != ''
         run: |
           python - <<'PY'
           import json
@@ -100,10 +102,14 @@ jobs:
           PY
 
       - name: Upload latest valid Iran market state
-        if: success() && steps.validate-market-state.outputs.valid == 'true'
+        if: steps.run_scheduler.outcome == 'success' && steps.validate-market-state.outputs.valid == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: iran-market-state
           path: iran_market_state.json
           if-no-files-found: warn
           retention-days: 30
+
+      - name: Report degraded scheduler without failing the workflow
+        if: steps.run_scheduler.outcome == 'failure'
+        run: echo "::warning::Scheduler completed with degraded/blocked data health; the health report was preserved and no invalid live market state was published."
