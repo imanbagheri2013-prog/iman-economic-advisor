@@ -17,10 +17,11 @@ from .equity_fundamentals import FundamentalSnapshot
 from .equity_sources import fetch_live_equity_input
 from .health import check_all, overall_status
 from .iran_market import IranMarketAdapter
+from .market_data_health import check_market_mirror_health
 from .market_intelligence import analyze_snapshots
 from .pipeline import load_config, pull_and_check
 from .providers.iran_market import configured_iran_symbols
-from .providers.iran_market_mirror import FallbackIranMarketProvider, IranMarketMirrorProvider
+from .providers.iran_market_mirror import DEFAULT_MIRROR_URL, IranMarketMirrorProvider
 from .providers.market import YahooChartProvider, configured_symbols
 from .runtime import load_equity_payload
 
@@ -109,13 +110,25 @@ def _iran_market_provider():
     return IranMarketMirrorProvider()
 
 
-def _live_market_intelligence(market_status: str) -> dict:
-    """Fetch Iran symbols from the Railway-safe mirror; never block on direct TSETMC."""
+def _market_mirror_url() -> str:
+    return os.getenv("IEA_IRAN_MARKET_MIRROR_URL", DEFAULT_MIRROR_URL).strip()
+
+
+def _live_market_intelligence(market_status: str, mirror_health: dict | None = None) -> dict:
+    """Fetch Iran symbols from the Railway-safe mirror; never analyze unhealthy mirror data."""
     iran_symbols = configured_iran_symbols()
     provider_name = "tsetmc-github-actions"
     if iran_symbols:
         symbols = iran_symbols
         provider = _iran_market_provider()
+        if mirror_health and mirror_health.get("status") == "CRITICAL":
+            return {
+                "engine": "IEA Market Intelligence", "version": "1.1", "status": "NO_DATA",
+                "market_status": market_status, "requested_symbols": symbols, "provider": provider_name,
+                "actionable_count": 0, "signals": [],
+                "safety": {"stale_data_action": "NO_TRADE", "closed_market_action": "NO_TRADE", "missing_required_data_action": "NO_TRADE"},
+                "health_gate": "BLOCKED",
+            }
     else:
         symbols = configured_symbols()
         provider = YahooChartProvider()
@@ -141,6 +154,8 @@ def _live_market_intelligence(market_status: str) -> dict:
     report["requested_symbols"] = symbols
     report["provider"] = provider_name
     report["analysis_only_when_closed"] = True
+    if mirror_health is not None:
+        report["health_gate"] = "OPEN" if mirror_health.get("status") in {"HEALTHY", "WARNING"} else "BLOCKED"
     if errors:
         report["errors"] = errors
     return report
@@ -264,7 +279,12 @@ def run() -> int:
     try:
         config = load_config()
         store, freshness_results, pipeline_status = _pull_with_retry()
-        health_results, health_status = check_all(store), None
+        health_results = check_all(store)
+        mirror_health = None
+        iran_symbols = configured_iran_symbols()
+        if iran_symbols:
+            mirror_health = check_market_mirror_health(_market_mirror_url(), expected_symbols=iran_symbols)
+            health_results.append(mirror_health)
         health_status = overall_status(health_results)
         capital = _capital_from_environment()
         market_status, session_date = _market_context()
@@ -274,7 +294,7 @@ def run() -> int:
             _save_market_state(intelligence)
         else:
             intelligence = _closed_market_intelligence(market_status, session_date)
-        live_market = _live_market_intelligence(market_status)
+        live_market = _live_market_intelligence(market_status, mirror_health=mirror_health)
         equity_cycle = _build_equity_cycle(intelligence, capital)
         central_bank = _central_bank_report(store, config)
         if pipeline_status != "OK":
@@ -287,7 +307,7 @@ def run() -> int:
             "pipeline_status": pipeline_status, "health_status": health_status, "observations": store.count(),
             "central_bank_observations": store.count_central_bank(), "database": str(store.path),
             "market_session": {"status": market_status, "date": session_date}, "freshness": freshness_results,
-            "health": health_results, "central_bank": central_bank, "intelligence": intelligence,
+            "health": health_results, "market_data_health": mirror_health, "central_bank": central_bank, "intelligence": intelligence,
             "live_market_intelligence": live_market}
         if equity_cycle is not None:
             payload["advisor"] = equity_cycle
