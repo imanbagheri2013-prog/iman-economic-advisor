@@ -1,0 +1,24 @@
+name: IEA Iran Market Dispatcher
+
+on:
+  push:
+    paths:
+      - "scripts/fetch_iran_market_via_proxy.py"
+      - "scripts/publish_iran_market_full_xlsx.py"
+      - ".github/workflows/iran-market-data.yml"
+      - ".github/workflows/trigger-iran-market.yml"
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dispatch:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch Full-Market mirror
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run iran-market-data.yml --repo "${{ github.repository }}" --ref main
