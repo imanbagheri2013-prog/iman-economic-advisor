@@ -7,7 +7,9 @@ on:
   push:
     paths:
       - "scripts/publish_iran_market_data.py"
+      - "scripts/publish_iran_market_full_xlsx.py"
       - ".github/workflows/iran-market-data.yml"
+      - "data/iran_market_live.json"
 
 permissions:
   contents: write
@@ -31,18 +33,92 @@ jobs:
       - name: Install requests
         run: python -m pip install requests
 
+      - name: Restore last valid market mirror
+        run: |
+          set -e
+          git fetch origin market-data
+          mkdir -p data
+          if git cat-file -e origin/market-data:data/iran_market_live.json 2>/dev/null; then
+            git show origin/market-data:data/iran_market_live.json > data/iran_market_live.json
+            echo "Restored previous valid market mirror as outage-safe baseline."
+          else
+            echo "No previous market mirror exists yet."
+          fi
+
       - name: Fetch full Iran market universe
-        run: python scripts/publish_iran_market_data.py
+        id: fetch_market
+        run: |
+          set +e
+          fetch_ok=false
+          for attempt in 1 2 3; do
+            echo "Iran market Full-Market Excel fetch attempt ${attempt}/3"
+            python scripts/publish_iran_market_full_xlsx.py
+            rc=$?
+            if [ "$rc" -eq 0 ]; then
+              fetch_ok=true
+              break
+            fi
+            echo "Iran market Full-Market Excel attempt ${attempt} failed with exit code ${rc}."
+            if [ "$attempt" -lt 3 ]; then sleep $((attempt * 15)); fi
+          done
+          if [ "$fetch_ok" = "true" ]; then
+            echo "fetch_ok=true" >> "$GITHUB_OUTPUT"
+            echo "Iran market Full-Market Excel fetch succeeded."
+          else
+            echo "fetch_ok=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Iran Full-Market Excel upstream was unavailable; preserving the last valid mirror. Data Health must treat this snapshot as stale."
+          fi
+          exit 0
+
+      - name: Verify full-universe mirror payload
+        if: steps.fetch_market.outputs.fetch_ok == 'true'
+        run: |
+          set -e
+          test -s data/iran_market_live.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path("data/iran_market_live.json")
+          data = json.loads(p.read_text(encoding="utf-8"))
+          symbols = data.get("symbols") or {}
+          mode = data.get("universe_mode")
+          count = int(data.get("universe_count") or len(symbols))
+          if not isinstance(symbols, dict) or not symbols:
+              raise SystemExit("market mirror exists but contains no symbols")
+          if mode != "FULL_MARKET":
+              raise SystemExit(f"market mirror is not full-universe: universe_mode={mode!r}")
+          if count < 100:
+              raise SystemExit(f"market mirror universe is implausibly small: universe_count={count}")
+          if count != len(symbols):
+              raise SystemExit(f"market mirror universe_count mismatch: metadata={count}, symbols={len(symbols)}")
+          for symbol, item in symbols.items():
+              info = item.get("instrument_info") or {}
+              if info.get("pClosing") is None or info.get("priceYesterday") is None:
+                  raise SystemExit(f"analysis-required price fields missing for {symbol}")
+          print(f"Full-market mirror payload valid: {count} symbols")
+          print(f"Generated at: {data.get('generated_at')}")
+          print(f"Source: {data.get('source')}")
+          PY
 
       - name: Publish mirror branch
+        if: steps.fetch_market.outputs.fetch_ok == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -e
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git fetch origin market-data || true
-          git checkout -B market-data
+          mkdir -p "$RUNNER_TEMP/iran-market-mirror"
+          cp data/iran_market_live.json "$RUNNER_TEMP/iran-market-mirror/iran_market_live.json"
+          git reset --hard HEAD
+          git clean -fd data
+          git checkout -B market-data origin/market-data
+          mkdir -p data
+          cp "$RUNNER_TEMP/iran-market-mirror/iran_market_live.json" data/iran_market_live.json
           git add data/iran_market_live.json
           git commit -m "Update full Iran market data mirror" || echo "No data changes"
           git push origin HEAD:market-data --force
+
+      - name: Report upstream outage without failing mirror publication
+        if: steps.fetch_market.outputs.fetch_ok == 'false'
+        run: echo "::warning::Upstream Iran market sources timed out; no non-full-universe snapshot was published. The existing mirror remains unchanged and Data Health must treat it according to its freshness."
