@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Iterable
 
+from .capital_allocation import build_capital_allocation
 from .equity_analysis import FundamentalSnapshot, analyze_equity, equity_analysis_summary
 from .equity_decision import build_equity_market_decision
 from .live_decision import apply_live_market_overlay
@@ -49,7 +50,8 @@ def build_equity_advisor_report(
 
     Configured live market data is automatically used when an explicit report
     is not supplied. Stale, missing, or disagreeing live data fails closed to
-    NO_TRADE through the live decision overlay.
+    NO_TRADE through the live decision overlay, and capital allocation is
+    allowed only after the final BUY/SELL gate passes.
     """
     analysis = analyze_equity(
         snapshot=snapshot,
@@ -75,6 +77,7 @@ def build_equity_advisor_report(
         live_report,
         symbol=analysis.symbol,
     )
+    decision, capital_allocation = build_capital_allocation(decision)
 
     return {
         "engine": "iea_equity_advisor_v1",
@@ -86,6 +89,7 @@ def build_equity_advisor_report(
             "regime": unified["regime"],
         },
         "decision": decision,
+        "capital_allocation": capital_allocation,
         "combined_score": unified["combined_score"],
         "weights": {
             "equity": unified["equity_weight"],
