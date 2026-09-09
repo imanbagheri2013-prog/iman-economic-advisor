@@ -190,7 +190,7 @@ def _live_equity_symbol() -> str | None:
     return raw.strip().upper() if raw and raw.strip() else None
 
 
-def _build_equity_cycle(intelligence: dict, capital: float | None) -> dict | None:
+def _build_equity_cycle(intelligence: dict, live_market: dict, capital: float | None) -> dict | None:
     path = _equity_payload_path()
     if path is not None and path.exists():
         payload = load_equity_payload(path)
@@ -217,7 +217,8 @@ def _build_equity_cycle(intelligence: dict, capital: float | None) -> dict | Non
         confidence, downside, upside, equity_weight, market_weight = 0.75, 0.20, 0.25, 0.40, 0.60
     return build_equity_advisor_report(snapshot=snapshot, current_price=current_price, method_values=method_values,
         method_weights=method_weights, market_report=intelligence, confidence=confidence, downside=downside,
-        upside=upside, methods_used=methods_used, equity_weight=equity_weight, market_weight=market_weight)
+        upside=upside, methods_used=methods_used, equity_weight=equity_weight, market_weight=market_weight,
+        live_market_intelligence=live_market)
 
 
 def _pull_with_retry():
@@ -302,7 +303,10 @@ def run() -> int:
         else:
             intelligence = _closed_market_intelligence(market_status, session_date)
         live_market = _live_market_intelligence(market_status, mirror_health=mirror_health)
-        equity_cycle = _build_equity_cycle(intelligence, capital)
+        intelligence["live_market_intelligence"] = live_market
+        intelligence["actionable_shortlist_symbols"] = live_market.get("actionable_shortlist_symbols", [])
+        intelligence["top_signal"] = live_market.get("top_signal")
+        equity_cycle = _build_equity_cycle(intelligence, live_market, capital)
         central_bank = _central_bank_report(store, config)
         if pipeline_status != "OK":
             status, exit_code = "error", 1
