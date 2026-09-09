@@ -142,4 +142,4 @@ jobs:
         if: steps.fetch_market.outputs.fetch_ok == 'false'
         run: echo "::warning::Upstream Iran market sources timed out; no non-full-universe snapshot was published. The existing mirror remains unchanged and Data Health must treat it according to its freshness."
 
-# Manual execution trigger: keep Full-Universe mirror workflow runnable on workflow changes.
+# Full-Market execution trigger: verify resilient upstream fallback now.
