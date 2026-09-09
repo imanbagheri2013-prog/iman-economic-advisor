@@ -72,9 +72,8 @@ def parse_tindex_history_text(text: str) -> tuple[float | None, str | None]:
     if not positive:
         return None, None
     first_close = rows[0][1] if rows else None
-    if first_close is not None and first_close > 0:
-        return (positive[1] if len(positive) >= 2 else positive[0])
-    return positive[0]
+    selected_date, selected_close = (positive[1] if len(positive) >= 2 else positive[0]) if first_close is not None and first_close > 0 else positive[0]
+    return selected_close, selected_date
 
 
 def fetch_tindex_history(session: requests.Session, symbol: str) -> tuple[float | None, str | None]:
