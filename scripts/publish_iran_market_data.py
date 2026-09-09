@@ -116,7 +116,7 @@ def flatten_json(obj: Any) -> list[dict[str, Any]]:
 
 def parse_tse_public_json(text: str) -> dict[str, dict[str, Any]]:
     data = json.loads(text.lstrip("\ufeff"))
-    rows = {}
+    rows: dict[str, dict[str, Any]] = {}
     for item in flatten_json(data):
         symbol = normalize_symbol(item.get("l18") or item.get("lVal18AFC") or item.get("symbol") or item.get("ticker") or item.get("sy") or item.get("s"))
         if symbol:
@@ -148,23 +148,32 @@ def parse_legacy(text: str) -> dict[str, dict[str, Any]]:
     return rows
 
 
-def fetch_marketwatch(requested: list[str]) -> tuple[dict[str, dict[str, Any]], str]:
-    try:
-        return fetch_tindex(requested)
-    except Exception as exc:
-        failures = [f"tindex/{type(exc).__name__}: {exc}"]
+def fetch_marketwatch(requested: list[str] | None = None) -> tuple[dict[str, dict[str, Any]], str]:
+    failures: list[str] = []
     targets = [(TSE_PUBLIC_JSON_URL, "tse-public-json"), (CDN_MARKETWATCH_URL, "tsetmc-cdn-direct"), (LEGACY_MARKETWATCH_URL, "tsetmc-legacy-direct")]
     for url, source in targets:
         try:
-            response = requests.get(url, headers=HEADERS, timeout=(4, 8))
+            response = requests.get(url, headers=HEADERS, timeout=(4, 10))
             response.raise_for_status()
             if source == "tse-public-json":
-                return parse_tse_public_json(response.text), source
-            if "cdn" in source:
-                return parse_cdn(response.text), source
-            return parse_legacy(response.text), source
+                rows = parse_tse_public_json(response.text)
+            elif source == "tsetmc-cdn-direct":
+                rows = parse_cdn(response.text)
+            else:
+                rows = parse_legacy(response.text)
+            if requested:
+                rows = {k: v for k, v in rows.items() if any(normalize_symbol(k) == normalize_symbol(s) for s in requested)}
+            if rows:
+                return rows, source
+            raise RuntimeError("marketwatch returned no usable rows")
         except Exception as exc:
             failures.append(f"{source}/{type(exc).__name__}: {exc}")
+
+    if requested:
+        try:
+            return fetch_tindex(requested)
+        except Exception as exc:
+            failures.append(f"tindex/{type(exc).__name__}: {exc}")
     raise RuntimeError("all Iran market sources failed: " + " | ".join(failures))
 
 
@@ -176,15 +185,19 @@ def market_status() -> str:
 def main() -> None:
     output = Path("data/iran_market_live.json")
     output.parent.mkdir(parents=True, exist_ok=True)
-    requested = [x.strip() for x in os.getenv("IEA_IR_SYMBOLS", ",".join(SYMBOLS)).split(",") if x.strip()]
-    rows, source = fetch_marketwatch(requested)
+
+    env_symbols = [x.strip() for x in os.getenv("IEA_IR_SYMBOLS", "").split(",") if x.strip()]
+    rows, source = fetch_marketwatch(env_symbols or None)
+    requested = env_symbols or sorted(rows)
     symbols: dict[str, dict[str, Any]] = {}
     errors: dict[str, str] = {}
+
     for symbol in requested:
         row = rows.get(symbol) or next((v for k, v in rows.items() if normalize_symbol(k) == normalize_symbol(symbol)), None)
         if row is None:
             errors[symbol] = "symbol not present"
             continue
+
         price = number(row.get("pc", row.get("pClosing", row.get("closingPrice", row.get("close", row.get("Close"))))))
         last = number(row.get("pl", row.get("pDrCotVal", row.get("lastPrice", row.get("last", row.get("Last", price))))))
         previous = number(row.get("py", row.get("priceYesterday", row.get("yesterdayPrice", row.get("previousClose")))))
@@ -196,19 +209,58 @@ def main() -> None:
         if price is None:
             errors[symbol] = "price missing"
             continue
-        quote_status = row.get("quote_status") or ("ACTIVE" if volume is not None and volume > 0 else "SUSPENDED_OR_NO_TRADE")
-        symbols[symbol] = {"instrument": {"lVal18AFC": symbol, "insCode": row.get("insCode") or row.get("ins_code")}, "instrument_info": {"pClosing": price, "pDrCotVal": last or price, "priceYesterday": previous, "priceMax": high, "priceMin": low, "qTotTran5J": volume, "previousDate": row.get("previous_date"), "quoteStatus": quote_status}, "daily": [], "client_type_history": [], "major_shareholders": [], "codal_filings": [], "statement_content": [], "share_changes": []}
-    payload = {"generated_at": datetime.now(timezone.utc).isoformat(), "source": f"{source}:github-actions", "market_status": market_status(), "symbols": symbols, "errors": errors}
+
+        quote_status = str(row.get("quote_status") or ("ACTIVE" if volume is not None and volume > 0 else "SUSPENDED_OR_NO_TRADE")).upper()
+        asset_type = str(row.get("instrumentType") or row.get("insType") or row.get("instrument_type") or row.get("cs") or row.get("cgrValCot") or "UNKNOWN")
+        symbols[symbol] = {
+            "instrument": {
+                "lVal18AFC": symbol,
+                "insCode": row.get("insCode") or row.get("ins_code") or row.get("inscode"),
+                "assetType": asset_type,
+            },
+            "instrument_info": {
+                "pClosing": price,
+                "pDrCotVal": last or price,
+                "priceYesterday": previous,
+                "priceMax": high,
+                "priceMin": low,
+                "qTotTran5J": volume,
+                "previousDate": row.get("previous_date"),
+                "dEven": row.get("dEven") or row.get("date") or row.get("tradeDate"),
+                "hEven": row.get("hEven") or row.get("time") or row.get("tradeTime"),
+                "quoteStatus": quote_status,
+            },
+            "daily": [],
+            "client_type_history": [],
+            "major_shareholders": [],
+            "codal_filings": [],
+            "statement_content": [],
+            "share_changes": [],
+        }
+
+    payload = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "source": f"{source}:github-actions",
+        "market_status": market_status(),
+        "universe_mode": "FULL_MARKET" if not env_symbols else "REQUESTED_SYMBOLS",
+        "universe_count": len(symbols),
+        "symbols": symbols,
+        "errors": errors,
+    }
     output.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
-    if len(symbols) != len(requested):
-        raise SystemExit(f"Iran market mirror incomplete: collected {len(symbols)}/{len(requested)}; missing={','.join(sorted(set(requested)-set(symbols)))}")
+
+    if not symbols:
+        raise SystemExit("Iran market mirror empty: no instruments collected")
+    if env_symbols and len(symbols) != len(env_symbols):
+        missing = sorted(set(env_symbols) - set(symbols))
+        raise SystemExit(f"Iran market mirror incomplete: collected {len(symbols)}/{len(env_symbols)}; missing={','.join(missing)}")
+
     missing_previous = [s for s, row in symbols.items() if row["instrument_info"].get("priceYesterday") is None]
     if missing_previous:
-        print("Symbols without previous close (individual NO_TRADE): " + ",".join(missing_previous))
-    print(f"Published {len(symbols)}/{len(requested)} requested Iran market symbols via {source}")
-    for symbol, row in symbols.items():
-        info = row["instrument_info"]
-        print(f"{symbol}: price={info['pClosing']} last={info['pDrCotVal']} previous={info['priceYesterday']} volume={info['qTotTran5J']} status={info['quoteStatus']}")
+        print("Symbols without previous close (individual NO_TRADE): " + ",".join(missing_previous[:50]))
+        if len(missing_previous) > 50:
+            print(f"... and {len(missing_previous) - 50} more")
+    print(f"Published {len(symbols)} Iran market instruments via {source}; universe_mode={payload['universe_mode']}")
 
 
 if __name__ == "__main__":
