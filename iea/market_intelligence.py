@@ -109,10 +109,6 @@ def _risk_levels(snapshot: MarketSnapshot, analysis_action: str) -> tuple[float 
 def _signal_score(snapshot: MarketSnapshot, change: float) -> tuple[float, list[str]]:
     """Score directional evidence while avoiding oversized one-factor signals."""
     reasons: list[str] = [f"price_change={change:.2f}%"]
-
-    # Smooth the price-change contribution: a very large move should add conviction,
-    # but should not by itself max out the signal. This reduces false positives from
-    # isolated price jumps while preserving strong directional moves.
     score = 60.0 * tanh(change / 3.0)
 
     if snapshot.volume is not None and snapshot.average_volume and snapshot.average_volume > 0:
@@ -136,8 +132,6 @@ def _signal_score(snapshot: MarketSnapshot, change: float) -> tuple[float, list[
                 score -= 5.0
                 reasons.append("price near session low")
 
-    # Small moves without confirmation should remain WAIT rather than becoming
-    # executable signals from noise alone.
     if abs(change) < 1.0:
         score *= 0.5
         reasons.append("small price move; confirmation required")
@@ -204,16 +198,32 @@ def analyze_snapshot(snapshot: MarketSnapshot) -> MarketSignal:
     )
 
 
+def rank_signals(signals: Iterable[MarketSignal]) -> list[MarketSignal]:
+    """Rank actionable signals first, then by conviction and confidence."""
+    return sorted(
+        signals,
+        key=lambda signal: (
+            signal.action in {"BUY", "SELL"},
+            abs(signal.score),
+            signal.confidence,
+        ),
+        reverse=True,
+    )
+
+
 def analyze_snapshots(snapshots: Iterable[MarketSnapshot]) -> dict[str, Any]:
     signals = [analyze_snapshot(snapshot) for snapshot in snapshots]
-    actionable = [signal for signal in signals if signal.action in {"BUY", "SELL"}]
+    ranked = rank_signals(signals)
+    actionable = [signal for signal in ranked if signal.action in {"BUY", "SELL"}]
     return {
         "engine": "IEA Market Intelligence",
         "version": "1.1",
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "count": len(signals),
         "actionable_count": len(actionable),
-        "signals": [signal.as_dict() for signal in signals],
+        "signals": [signal.as_dict() for signal in ranked],
+        "ranked_symbols": [signal.symbol for signal in ranked],
+        "actionable_ranked_symbols": [signal.symbol for signal in actionable],
         "safety": {
             "stale_data_action": "NO_TRADE",
             "closed_market_action": "NO_TRADE",
