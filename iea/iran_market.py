@@ -49,7 +49,6 @@ class IranMarketAdapter:
 
     @staticmethod
     def session_state(now: datetime | None = None) -> tuple[str, str]:
-        """Return OPEN/PRE_OPEN/CLOSED using Tehran local time."""
         current = (now or datetime.now(TEHRAN_TZ)).astimezone(TEHRAN_TZ)
         if current.weekday() in (3, 4):
             return "CLOSED", current.date().isoformat()
@@ -65,10 +64,8 @@ class IranMarketAdapter:
         return self.now_provider() if self.now_provider is not None else None
 
     def _get(self, path: str, params: dict[str, Any] | None = None) -> Any:
-        response = requests.get(
-            f"{TSETMC_CDN}{path}", params=params, timeout=self.timeout,
-            headers={"User-Agent": "Mozilla/5.0 IEA-Economic-Advisor"},
-        )
+        response = requests.get(f"{TSETMC_CDN}{path}", params=params, timeout=self.timeout,
+                                headers={"User-Agent": "Mozilla/5.0 IEA-Economic-Advisor"})
         response.raise_for_status()
         payload = response.json()
         if isinstance(payload, dict):
@@ -116,17 +113,15 @@ class IranMarketAdapter:
         market_status, session_date = self.session_state(current)
         if market_status != "OPEN":
             raise ValueError(f"Iran cash market is {market_status}; live market snapshot skipped")
-
         overview = self._get("/MarketData/GetMarketOverview/1")
         if isinstance(overview, list):
             overview = overview[0] if overview else {}
         if not isinstance(overview, dict):
             overview = {}
         watch = self._get("/ClosingPrice/GetMarketWatch", {
-            "market": 0, "industrialGroup": "", "paperTypes[0]": 1,
-            "paperTypes[1]": 2, "paperTypes[2]": 3, "paperTypes[3]": 4,
-            "paperTypes[4]": 5, "paperTypes[5]": 6, "paperTypes[6]": 7,
-            "paperTypes[7]": 8, "paperTypes[8]": 9, "showTraded": True,
+            "market": 0, "industrialGroup": "", "paperTypes[0]": 1, "paperTypes[1]": 2,
+            "paperTypes[2]": 3, "paperTypes[3]": 4, "paperTypes[4]": 5, "paperTypes[5]": 6,
+            "paperTypes[6]": 7, "paperTypes[7]": 8, "paperTypes[8]": 9, "showTraded": True,
             "withBestLimits": True, "hEven": 0, "RefID": 0,
         })
         rows = self._normalize_rows(watch)
@@ -155,17 +150,12 @@ class IranMarketAdapter:
                 total_ask += ask_qty * last
         if not active:
             raise ValueError("TSETMC market watch returned no active instruments")
-
         index_history = self._get(f"/ClosingPrice/GetClosingPriceDailyList/{TEDPIX_INSCODE}/0")
         closes = self._index_closes(index_history)
         return_1d = (closes[0] / closes[1] - 1.0) * 100.0 if len(closes) >= 2 and closes[1] else None
         return_20d = (closes[0] / closes[20] - 1.0) * 100.0 if len(closes) >= 21 and closes[20] else None
-        index_value = self._number(overview, "indexLastValue", "indexValue")
-        index_change = self._number(overview, "indexChange", "indexChangeValue")
-        if index_value is None:
-            index_value = closes[0] if closes else 0.0
-        if index_change is None:
-            index_change = return_1d or 0.0
+        index_value = self._number(overview, "indexLastValue", "indexValue") or (closes[0] if closes else 0.0)
+        index_change = self._number(overview, "indexChange", "indexChangeValue") or (return_1d or 0.0)
         total_depth = total_bid + total_ask
         imbalance = (total_bid - total_ask) / total_depth if total_depth else None
         active_count = len(active)
@@ -179,13 +169,61 @@ class IranMarketAdapter:
         except (requests.RequestException, OSError, ValueError, KeyError, TypeError):
             money_flow = None
         return IranMarketSnapshot(
-            symbol=self.symbol, price=index_value, change_pct=index_change,
-            volume=total_volume, quote_volume=total_value, bid=index_value, ask=index_value,
-            return_1d_pct=return_1d, return_20d_pct=return_20d, relative_volume=None,
-            bid_depth=total_bid or None, ask_depth=total_ask or None, depth_imbalance=imbalance,
-            breadth_up_pct=breadth_up, breadth_down_pct=breadth_down,
-            total_symbols=len(rows), active_symbols=active_count,
+            symbol=self.symbol, price=index_value, change_pct=index_change, volume=total_volume,
+            quote_volume=total_value, bid=index_value, ask=index_value, return_1d_pct=return_1d,
+            return_20d_pct=return_20d, relative_volume=None, bid_depth=total_bid or None,
+            ask_depth=total_ask or None, depth_imbalance=imbalance, breadth_up_pct=breadth_up,
+            breadth_down_pct=breadth_down, total_symbols=len(rows), active_symbols=active_count,
             market_status=market_status, session_date=session_date, money_flow=money_flow,
+        )
+
+class MirrorIranMarketAdapter:
+    """Build a fail-closed Iran market snapshot from the GitHub market-data mirror."""
+    provider = "TSETMC_GITHUB_MIRROR"
+
+    def __init__(self) -> None:
+        from .providers.iran_market_mirror import IranMarketMirrorProvider
+        from .providers.iran_market import configured_iran_symbols
+        self.provider_client = IranMarketMirrorProvider()
+        self.symbols = configured_iran_symbols()
+        self.symbol = "IRAN_MARKET"
+
+    def session_state(self, now: datetime | None = None) -> tuple[str, str]:
+        return IranMarketAdapter.session_state(now)
+
+    def snapshot(self, now: datetime | None = None) -> IranMarketSnapshot:
+        market_status, session_date = self.session_state(now)
+        if market_status != "OPEN":
+            raise ValueError(f"Iran cash market is {market_status}; live market snapshot skipped")
+        if not self.symbols:
+            raise ValueError("Iran market mirror has no configured symbols")
+        snapshots = []
+        failures = []
+        for symbol in self.symbols:
+            try:
+                snapshots.append(self.provider_client.snapshot(symbol))
+            except (requests.RequestException, OSError, ValueError, KeyError, TypeError) as exc:
+                failures.append(f"{symbol}: {type(exc).__name__}: {exc}")
+        if not snapshots:
+            raise ValueError("Iran market mirror unavailable: " + ("; ".join(failures) or "no symbols returned"))
+        total_volume = sum(float(s.volume or 0.0) for s in snapshots)
+        quote_volume = sum(float(s.volume or 0.0) * float(s.price or 0.0) for s in snapshots)
+        changes = [(s.price / s.previous_close - 1.0) * 100.0 for s in snapshots if s.previous_close and s.previous_close > 0]
+        return_1d = sum(changes) / len(changes) if changes else None
+        up = sum(1 for change in changes if change > 0)
+        down = sum(1 for change in changes if change < 0)
+        active_count = len(changes)
+        breadth_up = up / active_count * 100.0 if active_count else None
+        breadth_down = down / active_count * 100.0 if active_count else None
+        weights = [max(s.volume, 1.0) for s in snapshots]
+        weighted_price = sum(s.price * weight for s, weight in zip(snapshots, weights)) / sum(weights)
+        return IranMarketSnapshot(
+            symbol=self.symbol, price=weighted_price, change_pct=return_1d or 0.0,
+            volume=total_volume, quote_volume=quote_volume, bid=weighted_price, ask=weighted_price,
+            return_1d_pct=return_1d, return_20d_pct=None, relative_volume=None, bid_depth=None,
+            ask_depth=None, depth_imbalance=None, breadth_up_pct=breadth_up, breadth_down_pct=breadth_down,
+            total_symbols=len(self.symbols), active_symbols=active_count, market_status=market_status,
+            session_date=session_date,
         )
 
 def iran_factor_adapters(adapter: IranMarketAdapter):
@@ -200,9 +238,7 @@ def iran_factor_adapters(adapter: IranMarketAdapter):
             except (requests.RequestException, OSError, ValueError, KeyError, TypeError) as exc:
                 cache["error"] = exc
             cache["loaded"] = True
-        if cache["error"] is not None:
-            return None
-        return cache["snapshot"]
+        return None if cache["error"] is not None else cache["snapshot"]
 
     def unavailable(name: str):
         error = cache["error"]
@@ -215,8 +251,14 @@ def iran_factor_adapters(adapter: IranMarketAdapter):
         snap = get_snapshot()
         if snap is None:
             return unavailable("trend")
-        if snap.return_1d_pct is None or snap.return_20d_pct is None:
+        if snap.return_1d_pct is None:
             return FactorResult("trend", "UNAVAILABLE", provider=adapter.provider)
+        if snap.return_20d_pct is None:
+            score = max(0.0, min(100.0, 50.0 + snap.return_1d_pct * 3.0))
+            return FactorResult("trend", "OK", round(score, 2), 0.55, adapter.provider,
+                                details={"symbol": snap.symbol, "return_1d_pct": round(snap.return_1d_pct, 4),
+                                         "return_20d_pct": None, "sample_count": max(snap.active_symbols, 1),
+                                         "history_depth": "1d_only"})
         score = max(0.0, min(100.0, 50.0 + snap.return_1d_pct * 3.0 + snap.return_20d_pct * 1.5))
         return FactorResult("trend", "OK", round(score, 2), 0.9, adapter.provider,
                             details={"symbol": snap.symbol, "return_1d_pct": round(snap.return_1d_pct, 4),
@@ -239,7 +281,8 @@ def iran_factor_adapters(adapter: IranMarketAdapter):
         if snap is None:
             return unavailable("liquidity")
         if snap.bid_depth is None or snap.ask_depth is None or snap.depth_imbalance is None:
-            return FactorResult("liquidity", "UNAVAILABLE", provider=adapter.provider)
+            return FactorResult("liquidity", "UNAVAILABLE", provider=adapter.provider,
+                                details={"reason": "order_book_depth_not_available_in_mirror"})
         balance_score = max(0.0, min(100.0, 100.0 - abs(snap.depth_imbalance) * 100.0))
         return FactorResult("liquidity", "OK", round(balance_score, 2), 0.75, adapter.provider,
                             details={"symbol": snap.symbol, "bid_depth_value": snap.bid_depth,
