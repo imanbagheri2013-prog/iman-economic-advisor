@@ -33,12 +33,7 @@ def check_market_mirror_health(
     expected_symbols: list[str] | None = None,
     timeout: float = 12.0,
 ) -> dict[str, Any]:
-    """Validate the market-data mirror as real analysis input.
-
-    Checks transport/JSON validity, snapshot freshness, symbol coverage,
-    numeric prices, previous closes and analysis-ready active symbols.
-    Suspended symbols are reported separately and are never actionable.
-    """
+    """Validate the market-data mirror as real analysis input."""
     result: dict[str, Any] = {
         "component": "iran_market_mirror",
         "provider": "tsetmc-github-actions",
@@ -80,10 +75,7 @@ def check_market_mirror_health(
         expected = [str(x).strip() for x in (expected_symbols or []) if str(x).strip()]
         target_symbols = expected or [str(x).strip() for x in symbols if str(x).strip()]
         result["expected_symbol_count"] = len(expected)
-        result["coverage"] = (
-            round(len(set(target_symbols).intersection(symbols)) / len(target_symbols), 4)
-            if target_symbols else 0.0
-        )
+        result["coverage"] = round(len(set(target_symbols).intersection(symbols)) / len(target_symbols), 4) if target_symbols else 0.0
 
         age = _age_seconds(generated_at)
         limit = OPEN_MAX_AGE_SECONDS if market_status == "OPEN" else CLOSED_MAX_AGE_SECONDS
@@ -100,13 +92,11 @@ def check_market_mirror_health(
                 result["invalid_symbols"].append(symbol)
                 result["missing_required_data"].append({"symbol": symbol, "fields": ["symbol"]})
                 continue
-
             info = row.get("instrument_info") or {}
             instrument = row.get("instrument") or {}
             quote_status = str(info.get("quoteStatus") or "ACTIVE").upper()
             if quote_status != "ACTIVE":
                 result["suspended_symbols"].append(symbol)
-
             missing: list[str] = []
             if not str(instrument.get("lVal18AFC") or symbol).strip():
                 missing.append("symbol")
@@ -116,12 +106,10 @@ def check_market_mirror_health(
                 missing.append("price")
             if previous is None or previous <= 0:
                 missing.append("previous_close")
-
             if missing:
                 result["invalid_symbols"].append(symbol)
                 result["missing_required_data"].append({"symbol": symbol, "fields": missing})
                 continue
-
             result["valid_symbols"].append(symbol)
             if quote_status == "ACTIVE":
                 result["analysis_ready_symbols"].append(symbol)
@@ -133,9 +121,9 @@ def check_market_mirror_health(
             result["status"] = "CRITICAL" if result["analysis_ready_symbol_count"] == 0 else "WARNING"
         elif result["analysis_ready_symbol_count"] == 0:
             result["status"] = "CRITICAL"
-        elif result["suspended_symbols"]:
-            result["status"] = "WARNING"
         else:
+            # Suspended symbols are validly represented but not analysis-ready;
+            # they must not turn a healthy market snapshot red by themselves.
             result["status"] = "HEALTHY"
     except (requests.RequestException, ValueError, TypeError) as exc:
         result["errors"].append(f"{type(exc).__name__}: {exc}")
