@@ -9,7 +9,7 @@ import yaml
 
 from .central_bank_provider import fetch_observations
 from .data_freshness import check_table_freshness
-from .health import check_market_mirror_health
+from .market_data_health import check_market_mirror_health
 from .providers.bls import BLS
 from .providers.fred import FRED
 from .providers.iran_market import configured_iran_symbols
