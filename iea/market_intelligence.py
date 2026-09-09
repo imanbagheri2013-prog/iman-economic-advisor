@@ -76,10 +76,18 @@ def _pct_change(price: float, previous: Optional[float]) -> Optional[float]:
 
 
 def analyze_snapshot(snapshot: MarketSnapshot) -> MarketSignal:
-    """Analyze live and closed snapshots without confusing the two."""
+    """Analyze live and closed snapshots without treating suspended symbols as market-wide closure."""
     observed = snapshot.observed_at
     if observed.tzinfo is None:
         observed = observed.replace(tzinfo=timezone.utc)
+
+    if snapshot.market_status == "SUSPENDED":
+        return MarketSignal(
+            symbol=snapshot.symbol, action="NO_TRADE", score=0.0, confidence=0.0,
+            market_state="SUSPENDED", reasons=("symbol is suspended or has no current trade; symbol-level NO_TRADE",),
+            data_fresh=snapshot.fresh, observed_at=observed.isoformat(), source=snapshot.source,
+            market_status="SUSPENDED", data_date=snapshot.data_date,
+        )
 
     if not snapshot.analyzable:
         return MarketSignal(
@@ -155,6 +163,7 @@ def analyze_snapshots(snapshots: Iterable[MarketSnapshot]) -> dict[str, Any]:
         "safety": {
             "stale_data_action": "NO_TRADE",
             "closed_market_action": "NO_TRADE",
+            "suspended_symbol_action": "NO_TRADE",
             "missing_required_data_action": "NO_TRADE",
         },
     }
