@@ -81,6 +81,7 @@ jobs:
           exit "$last_status"
 
       - name: Verify full-universe mirror payload
+        if: steps.fetch_market.outcome == 'success'
         run: |
           set -e
           test -s data/iran_market_live.json
@@ -106,6 +107,7 @@ jobs:
           PY
 
       - name: Publish mirror branch
+        if: steps.fetch_market.outcome == 'success'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -128,4 +130,4 @@ jobs:
 
       - name: Report upstream outage without failing mirror publication
         if: steps.fetch_market.outcome == 'failure'
-        run: echo "::warning::Published the last valid Iran market mirror because upstream market sources timed out."
+        run: echo "::warning::Upstream Iran market sources timed out; no non-full-universe snapshot was published. The existing mirror remains unchanged and Data Health must treat it according to its freshness."
