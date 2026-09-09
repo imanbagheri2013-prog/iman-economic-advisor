@@ -14,6 +14,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: iran-market-data
+  cancel-in-progress: true
+
 jobs:
   publish:
     runs-on: ubuntu-latest
@@ -158,4 +162,4 @@ jobs:
           echo "::error::No valid Full-Market snapshot was produced. Existing market-data mirror was not modified."
           exit 1
 
-      # Final gate: this workflow is green only after a real Full-Market payload is verified and publishable.
+      # Final gate: green only after a real Full-Market payload is verified and publishable.
