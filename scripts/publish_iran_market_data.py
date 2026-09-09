@@ -62,31 +62,20 @@ def fetch_tindex_history(session: requests.Session, symbol: str) -> tuple[float 
         return None, None
 
     tail = text.split(marker, 1)[1]
-    date_pattern = re.compile(rf"^(?:[۰-۹0-9]{{1,2}})\s+(?:{PERSIAN_MONTHS})\s+[۰-۹0-9]{{4}}$")
+    date_pattern = re.compile(rf"[۰-۹0-9]{{1,2}}\s+(?:{PERSIAN_MONTHS})\s+[۰-۹0-9]{{4}}")
+    date_matches = list(date_pattern.finditer(tail))
     rows: list[tuple[str, float | None]] = []
 
-    # Parse the rendered table by columns instead of relying on a single
-    # regex. TIndex occasionally changes whitespace/number formatting while
-    # keeping the stable six-column table contract.
-    for chunk in tail.split(" | "):
-        pass
-
-    tokens = tail.split(" | ")
-    for index in range(0, len(tokens) - 5, 6):
-        date_text = tokens[index].strip()
-        if not date_pattern.match(date_text):
-            continue
-        close_text = tokens[index + 4].strip()
-        rows.append((date_text, number(close_text)))
-
-    if not rows:
-        # Fallback for HTML-to-text renderers that normalize table cells
-        # differently: inspect line-like table rows directly.
-        row_pattern = re.compile(rf"({PERSIAN_MONTHS})")
-        for line in re.split(r"\n+", tail):
-            parts = [part.strip() for part in line.split("|")]
-            if len(parts) >= 6 and row_pattern.search(parts[0]):
-                rows.append((parts[0], number(parts[4])))
+    # TIndex renders the history table as whitespace-separated text after
+    # HTML stripping. Parse each dated row by taking the four numeric price
+    # columns that follow the date; this survives changes in whitespace and
+    # table-cell separators.
+    for index, match in enumerate(date_matches):
+        segment_end = date_matches[index + 1].start() if index + 1 < len(date_matches) else len(tail)
+        segment = tail[match.end():segment_end]
+        numeric_tokens = re.findall(r"[۰-۹0-9][۰-۹0-9٬,٫.]*", segment)
+        close = number(numeric_tokens[3]) if len(numeric_tokens) >= 4 else None
+        rows.append((match.group(0), close))
 
     if not rows:
         return None, None
@@ -182,51 +171,56 @@ def fetch_marketwatch(requested: list[str]) -> tuple[dict[str, dict[str, Any]], 
             return parse_legacy(response.text), source
         except Exception as exc:
             failures.append(f"{source}/{type(exc).__name__}: {exc}")
-    raise RuntimeError("all Iran market sources failed: " + " | ".join(failures))
+    raise RuntimeError("all Iran market providers failed: " + " | ".join(failures))
 
 
-def market_status() -> str:
-    now = datetime.now(ZoneInfo("Asia/Tehran"))
-    return "OPEN" if now.weekday() in {5, 6, 0, 1, 2} and 9 <= now.hour + now.minute / 60 < 12.5 else "CLOSED"
+def _number(value: Any) -> float | None:
+    return number(value)
 
 
-def main() -> None:
-    output = Path("data/iran_market_live.json")
-    output.parent.mkdir(parents=True, exist_ok=True)
-    requested = [x.strip() for x in os.getenv("IEA_IR_SYMBOLS", ",".join(SYMBOLS)).split(",") if x.strip()]
-    rows, source = fetch_marketwatch(requested)
-    symbols: dict[str, dict[str, Any]] = {}
-    errors: dict[str, str] = {}
-    for symbol in requested:
-        row = rows.get(symbol) or next((v for k, v in rows.items() if normalize_symbol(k) == normalize_symbol(symbol)), None)
-        if row is None:
-            errors[symbol] = "symbol not present"
+def _build_snapshot(rows: dict[str, dict[str, Any]], source: str) -> dict[str, Any]:
+    generated_at = datetime.now(timezone.utc).isoformat()
+    symbols: dict[str, Any] = {}
+    for symbol in SYMBOLS:
+        row = rows.get(symbol)
+        if not row:
             continue
-        price = number(row.get("pc", row.get("pClosing", row.get("closingPrice", row.get("close", row.get("Close"))))))
-        last = number(row.get("pl", row.get("pDrCotVal", row.get("lastPrice", row.get("last", row.get("Last", price))))))
-        previous = number(row.get("py", row.get("priceYesterday", row.get("yesterdayPrice", row.get("previousClose")))))
-        volume = number(row.get("volume", row.get("tvol", row.get("qTotTran5J", row.get("tradeVolume", row.get("volume_raw"))))))
-        high = number(row.get("pmax", row.get("priceMax", row.get("highValue", row.get("high", row.get("High"))))))
-        low = number(row.get("pmin", row.get("priceMin", row.get("lowValue", row.get("low", row.get("Low"))))))
-        if price is None and last is not None:
-            price = last
-        if price is None:
-            errors[symbol] = "price missing"
-            continue
-        quote_status = row.get("quote_status") or ("ACTIVE" if volume is not None and volume > 0 else "SUSPENDED_OR_NO_TRADE")
-        symbols[symbol] = {"instrument": {"lVal18AFC": symbol, "insCode": row.get("insCode") or row.get("ins_code")}, "instrument_info": {"pClosing": price, "pDrCotVal": last or price, "priceYesterday": previous, "qTotTran5J": volume, "priceMax": high, "priceMin": low, "previousDate": row.get("previous_date"), "quoteStatus": quote_status}, "daily": [], "client_type_history": [], "major_shareholders": [], "codal_filings": [], "statement_content": [], "share_changes": []}
-    payload = {"generated_at": datetime.now(timezone.utc).isoformat(), "source": f"{source}:github-actions", "market_status": market_status(), "symbols": symbols, "errors": errors}
-    output.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
-    if len(symbols) != len(requested):
-        raise SystemExit(f"Iran market mirror incomplete: collected {len(symbols)}/{len(requested)}; missing={','.join(sorted(set(requested)-set(symbols)))}")
-    missing_previous = [s for s, row in symbols.items() if row["instrument_info"].get("priceYesterday") is None]
-    if missing_previous:
-        print("Symbols without previous close (individual NO_TRADE): " + ",".join(missing_previous))
-    print(f"Published {len(symbols)}/{len(requested)} requested Iran market symbols via {source}")
-    for symbol, row in symbols.items():
-        info = row["instrument_info"]
-        print(f"{symbol}: price={info['pClosing']} last={info['pDrCotVal']} previous={info['priceYesterday']} volume={info['qTotTran5J']} status={info['quoteStatus']}")
+        symbols[symbol] = {
+            "instrument": {"lVal18AFC": symbol, "insCode": row.get("insCode")},
+            "instrument_info": {
+                "pClosing": _number(row.get("pc") or row.get("pClosing")),
+                "pDrCotVal": _number(row.get("pl") or row.get("pDrCotVal")),
+                "priceYesterday": _number(row.get("py") or row.get("priceYesterday")),
+                "qTotTran5J": _number(row.get("volume") or row.get("qTotTran5J") or row.get("tvol")),
+                "priceMax": _number(row.get("pmax") or row.get("priceMax")),
+                "priceMin": _number(row.get("pmin") or row.get("priceMin")),
+                "previousDate": row.get("previous_date"),
+                "quoteStatus": row.get("quote_status", "ACTIVE"),
+            },
+            "daily": [],
+            "client_type_history": [],
+            "major_shareholders": [],
+            "codal_filings": [],
+            "statement_content": [],
+            "share_changes": [],
+        }
+    return {"generated_at": generated_at, "source": source, "market_status": "OPEN", "symbols": symbols, "errors": {}}
+
+
+def main() -> int:
+    requested = list(SYMBOLS)
+    try:
+        rows, source = fetch_marketwatch(requested)
+        payload = _build_snapshot(rows, source)
+        output = Path(os.getenv("IEA_IRAN_MARKET_OUTPUT", "data/iran_market_live.json"))
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return 0
+    except Exception as exc:
+        print(f"Iran market publisher failed: {type(exc).__name__}: {exc}")
+        return 1
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
