@@ -104,8 +104,19 @@ jobs:
           set -e
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Preserve the generated/restored payload outside the main worktree.
+          mkdir -p "$RUNNER_TEMP/iran-market-mirror"
+          cp data/iran_market_live.json "$RUNNER_TEMP/iran-market-mirror/iran_market_live.json"
+
+          # The fetch step patches the script in-place, so reset the worktree before
+          # switching branches; otherwise checkout is blocked by dirty/untracked files.
+          git reset --hard HEAD
+          git clean -fd data
           git checkout -B market-data origin/market-data
-          git checkout main -- data/iran_market_live.json
+
+          mkdir -p data
+          cp "$RUNNER_TEMP/iran-market-mirror/iran_market_live.json" data/iran_market_live.json
           git add data/iran_market_live.json
           git commit -m "Update full Iran market data mirror" || echo "No data changes"
           git push origin HEAD:market-data --force
