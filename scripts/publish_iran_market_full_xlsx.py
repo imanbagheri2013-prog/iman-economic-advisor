@@ -223,21 +223,9 @@ def fetch_full_market():
     session = requests.Session()
     session.headers.update(HEADERS)
 
-    # Preferred legacy XLSX sources when reachable.
-    for url in EXCEL_URLS:
-        try:
-            response = session.get(url, timeout=(8, 25), allow_redirects=True)
-            response.raise_for_status()
-            symbols = parse_excel(response.content)
-            if len(symbols) >= 100:
-                return symbols, f"tsetmc-full-market-excel:{url}"
-            errors.append(f"{url}: only {len(symbols)} symbols")
-        except Exception as exc:
-            errors.append(f"{url}: {type(exc).__name__}: {exc}")
-
-    # GitHub Actions can reach cdn.tsetmc.com even when old.tsetmc.com is unreachable.
+    # Fast path first: CDN is the preferred source for GitHub-hosted execution.
     try:
-        response = session.get(CDN_MARKETWATCH_URL, timeout=(8, 30), allow_redirects=True)
+        response = session.get(CDN_MARKETWATCH_URL, timeout=(5, 12), allow_redirects=True)
         response.raise_for_status()
         symbols = parse_cdn_marketwatch(response.content)
         if len(symbols) >= 100:
@@ -246,9 +234,21 @@ def fetch_full_market():
     except Exception as exc:
         errors.append(f"{CDN_MARKETWATCH_URL}: {type(exc).__name__}: {exc}")
 
+    # Legacy XLSX sources are retained as secondary fallbacks.
+    for url in EXCEL_URLS:
+        try:
+            response = session.get(url, timeout=(4, 10), allow_redirects=True)
+            response.raise_for_status()
+            symbols = parse_excel(response.content)
+            if len(symbols) >= 100:
+                return symbols, f"tsetmc-full-market-excel:{url}"
+            errors.append(f"{url}: only {len(symbols)} symbols")
+        except Exception as exc:
+            errors.append(f"{url}: {type(exc).__name__}: {exc}")
+
     for url in TEXT_URLS:
         try:
-            response = session.get(url, timeout=(8, 25), allow_redirects=True)
+            response = session.get(url, timeout=(4, 10), allow_redirects=True)
             response.raise_for_status()
             symbols = parse_legacy_text(response.content)
             if len(symbols) >= 100:
