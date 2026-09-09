@@ -81,9 +81,11 @@ def check_market_mirror_health(
         limit = OPEN_MAX_AGE_SECONDS if market_status == "OPEN" else CLOSED_MAX_AGE_SECONDS
         result["freshness_seconds"] = age
         result["freshness_limit_seconds"] = limit
+        stale = False
         if age is None:
             result["errors"].append("generated_at is missing or invalid")
         elif age > limit:
+            stale = True
             result["errors"].append(f"mirror snapshot is stale: age_seconds={round(age, 2)}")
 
         for symbol in target_symbols:
@@ -117,7 +119,9 @@ def check_market_mirror_health(
         result["valid_symbol_count"] = len(result["valid_symbols"])
         result["analysis_ready_symbol_count"] = len(result["analysis_ready_symbols"])
 
-        if result["errors"] or result["coverage"] < 1.0:
+        if stale:
+            result["status"] = "CRITICAL"
+        elif result["errors"] or result["coverage"] < 1.0:
             result["status"] = "CRITICAL" if result["analysis_ready_symbol_count"] == 0 else "WARNING"
         elif result["analysis_ready_symbol_count"] == 0:
             result["status"] = "CRITICAL"
