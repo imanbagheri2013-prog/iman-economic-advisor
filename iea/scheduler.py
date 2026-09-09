@@ -29,6 +29,7 @@ REPORT_PATH = Path(os.getenv("IEA_REPORT_PATH", "health_report.json"))
 MARKET_STATE_PATH = Path(os.getenv("IEA_MARKET_STATE_PATH", "iran_market_state.json"))
 MAX_PULL_ATTEMPTS = 3
 RETRY_DELAYS_SECONDS = (2, 5)
+MAX_ACTIONABLE_SIGNALS = 3
 
 
 def _save_report(payload: dict) -> None:
@@ -151,6 +152,16 @@ def _live_market_intelligence(market_status: str, mirror_health: dict | None = N
     report["analysis_only_when_closed"] = True
     if mirror_health is not None:
         report["health_gate"] = "OPEN" if mirror_health.get("status") in {"HEALTHY", "WARNING"} else "BLOCKED"
+
+    ranked = report.get("signals", [])
+    actionable = [signal for signal in ranked if signal.get("action") in {"BUY", "SELL"}]
+    shortlist = actionable[:MAX_ACTIONABLE_SIGNALS]
+    report["actionable_shortlist"] = shortlist
+    report["actionable_shortlist_symbols"] = [signal.get("symbol") for signal in shortlist]
+    report["shortlist_limit"] = MAX_ACTIONABLE_SIGNALS
+    report["shortlist_policy"] = "TOP_RANKED_ACTIONABLE_ADVISORY_ONLY"
+    report["top_signal"] = shortlist[0] if shortlist else None
+
     if errors:
         report["errors"] = errors
     return report
