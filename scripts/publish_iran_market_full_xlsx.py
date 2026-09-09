@@ -11,11 +11,20 @@ from zoneinfo import ZoneInfo
 
 import requests
 
-URL = "https://old.tsetmc.com/tsev2/excel/MarketWatchPlus.aspx?d=0"
+EXCEL_URLS = [
+    "https://old.tsetmc.com/tsev2/excel/MarketWatchPlus.aspx?d=0",
+    "https://members.tsetmc.com/tsev2/excel/MarketWatchPlus.aspx?d=0",
+    "http://old.tsetmc.com/tsev2/excel/MarketWatchPlus.aspx?d=0",
+    "http://members.tsetmc.com/tsev2/excel/MarketWatchPlus.aspx?d=0",
+]
+TEXT_URLS = [
+    "https://old.tsetmc.com/tsev2/data/MarketWatchPlus.aspx",
+    "http://old.tsetmc.com/tsev2/data/MarketWatchPlus.aspx",
+]
 OUT = Path("data/iran_market_live.json")
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126 Safari/537.36",
-    "Accept": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/octet-stream,*/*",
+    "Accept": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/octet-stream,text/plain,*/*",
 }
 NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 
@@ -31,9 +40,11 @@ def num(value):
 
 
 def col_index(ref: str) -> int:
-    letters = re.match(r"[A-Z]+", ref).group(0)
+    match = re.match(r"[A-Z]+", ref)
+    if not match:
+        return 0
     value = 0
-    for ch in letters:
+    for ch in match.group(0):
         value = value * 26 + ord(ch) - 64
     return value - 1
 
@@ -59,10 +70,12 @@ def read_xlsx(content: bytes) -> list[list[str]]:
             root = ET.fromstring(zf.read("xl/sharedStrings.xml"))
             for si in root.findall(f"{{{NS}}}si"):
                 shared.append("".join(t.text or "" for t in si.iter(f"{{{NS}}}t")))
-        sheet = next((n for n in names if re.fullmatch(r"xl/worksheets/sheet\d+\.xml", n)), None)
-        if not sheet:
+        sheets = sorted(
+            n for n in names if re.fullmatch(r"xl/worksheets/sheet\d+\.xml", n)
+        )
+        if not sheets:
             raise RuntimeError("workbook has no worksheet")
-        root = ET.fromstring(zf.read(sheet))
+        root = ET.fromstring(zf.read(sheets[0]))
         rows = []
         for row in root.findall(f".//{{{NS}}}sheetData/{{{NS}}}row"):
             values = {}
@@ -76,17 +89,41 @@ def read_xlsx(content: bytes) -> list[list[str]]:
 
 def find_header(rows):
     required = {"l18", "pc", "py"}
-    for idx, row in enumerate(rows[:8]):
+    for idx, row in enumerate(rows[:12]):
         normalized = {str(v).strip().lower(): i for i, v in enumerate(row) if str(v).strip()}
         if required.issubset(normalized):
             return idx, normalized
-    raise RuntimeError("legacy Full-Market Excel header does not expose l18/pc/py")
+    raise RuntimeError("Full-Market Excel header does not expose l18/pc/py")
 
 
-def main():
-    response = requests.get(URL, headers=HEADERS, timeout=(20, 60))
-    response.raise_for_status()
-    rows = read_xlsx(response.content)
+def build_item(symbol, inscode, isin, closing, last, previous, pmax, pmin, volume, heven=""):
+    return {
+        "instrument": {
+            "lVal18AFC": symbol,
+            "insCode": str(inscode or "") or None,
+            "isin": str(isin or "") or None,
+        },
+        "instrument_info": {
+            "pClosing": closing if closing is not None else last,
+            "pDrCotVal": last,
+            "priceYesterday": previous,
+            "priceMax": pmax,
+            "priceMin": pmin,
+            "qTotTran5J": volume,
+            "hEven": heven,
+            "quoteStatus": "ACTIVE" if volume not in (None, 0) else "SUSPENDED_OR_NO_TRADE",
+        },
+        "daily": [],
+        "client_type_history": [],
+        "major_shareholders": [],
+        "codal_filings": [],
+        "statement_content": [],
+        "share_changes": [],
+    }
+
+
+def parse_excel(content: bytes):
+    rows = read_xlsx(content)
     header_idx, header = find_header(rows)
 
     def get(row, name):
@@ -103,33 +140,97 @@ def main():
         previous = num(get(row, "py"))
         if price is None and last is None:
             continue
-        symbols[symbol] = {
-            "instrument": {"lVal18AFC": symbol, "insCode": str(get(row, "inscode") or "") or None, "isin": str(get(row, "iid") or "") or None},
-            "instrument_info": {
-                "pClosing": price if price is not None else last,
-                "pDrCotVal": last,
-                "priceYesterday": previous,
-                "priceMax": num(get(row, "pmax")),
-                "priceMin": num(get(row, "pmin")),
-                "qTotTran5J": num(get(row, "tvol")),
-                "hEven": get(row, "heven"),
-                "quoteStatus": "ACTIVE" if num(get(row, "tvol")) not in (None, 0) else "SUSPENDED_OR_NO_TRADE",
-            },
-            "daily": [],
-            "client_type_history": [],
-            "major_shareholders": [],
-            "codal_filings": [],
-            "statement_content": [],
-            "share_changes": [],
-        }
+        symbols[symbol] = build_item(
+            symbol,
+            get(row, "inscode"),
+            get(row, "iid"),
+            price,
+            last,
+            previous,
+            num(get(row, "pmax")),
+            num(get(row, "pmin")),
+            num(get(row, "tvol")),
+            get(row, "heven"),
+        )
+    return symbols
 
+
+def parse_legacy_text(content: bytes):
+    text = content.decode("utf-8-sig", errors="replace")
+    parts = text.split("@")
+    if len(parts) < 3:
+        raise RuntimeError("legacy MarketWatch response has no instrument section")
+    symbols = {}
+    for raw in parts[2].split(";"):
+        fields = raw.split(",")
+        if len(fields) < 14:
+            continue
+        symbol = fields[2].strip()
+        if not symbol or symbol in symbols:
+            continue
+        closing = num(fields[6])
+        last = num(fields[7]) or closing
+        previous = num(fields[13])
+        if closing is None and last is None:
+            continue
+        symbols[symbol] = build_item(
+            symbol,
+            fields[0],
+            None,
+            closing,
+            last,
+            previous,
+            num(fields[12]),
+            num(fields[11]),
+            num(fields[9]),
+            fields[0],
+        )
+    return symbols
+
+
+def fetch_full_market():
+    errors = []
+    session = requests.Session()
+    session.headers.update(HEADERS)
+
+    for url in EXCEL_URLS:
+        try:
+            response = session.get(url, timeout=(15, 45), allow_redirects=True)
+            response.raise_for_status()
+            symbols = parse_excel(response.content)
+            if len(symbols) >= 100:
+                return symbols, f"tsetmc-full-market-excel:{url}"
+            errors.append(f"{url}: only {len(symbols)} symbols")
+        except Exception as exc:
+            errors.append(f"{url}: {type(exc).__name__}: {exc}")
+
+    for url in TEXT_URLS:
+        try:
+            response = session.get(url, timeout=(15, 45), allow_redirects=True)
+            response.raise_for_status()
+            symbols = parse_legacy_text(response.content)
+            if len(symbols) >= 100:
+                return symbols, f"tsetmc-full-market-text:{url}"
+            errors.append(f"{url}: only {len(symbols)} symbols")
+        except Exception as exc:
+            errors.append(f"{url}: {type(exc).__name__}: {exc}")
+
+    raise RuntimeError("All Full-Market sources failed or returned too few symbols: " + " | ".join(errors))
+
+
+def main():
+    symbols, source = fetch_full_market()
     if len(symbols) < 100:
-        raise RuntimeError(f"Full-Market Excel returned only {len(symbols)} valid symbols")
+        raise RuntimeError(f"Full-Market returned only {len(symbols)} valid symbols")
+
+    now_tehran = datetime.now(ZoneInfo("Asia/Tehran"))
+    is_weekday = now_tehran.weekday() in {5, 6, 0, 1, 2}
+    market_status = "OPEN" if is_weekday and 9 <= now_tehran.hour < 13 else "CLOSED"
 
     payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "source": "tsetmc-legacy-excel:github-actions",
-        "market_status": "OPEN" if datetime.now(ZoneInfo("Asia/Tehran")).weekday() in {5, 6, 0, 1, 2} else "CLOSED",
+        "source": source,
+        "market_status": market_status,
         "universe_mode": "FULL_MARKET",
         "universe_count": len(symbols),
         "symbols": symbols,
@@ -137,8 +238,10 @@ def main():
     }
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
-    print(f"Full-Market Excel mirror created: {len(symbols)} symbols")
+    print(f"Full-Market mirror created: {len(symbols)} symbols")
     print(f"Generated at: {payload['generated_at']}")
+    print(f"Source: {source}")
+    print(f"Market status: {market_status}")
 
 
 if __name__ == "__main__":
