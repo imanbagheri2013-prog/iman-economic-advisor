@@ -21,10 +21,18 @@ TEXT_URLS = [
     "https://old.tsetmc.com/tsev2/data/MarketWatchPlus.aspx",
     "http://old.tsetmc.com/tsev2/data/MarketWatchPlus.aspx",
 ]
+CDN_MARKETWATCH_URL = (
+    "https://cdn.tsetmc.com/api/ClosingPrice/GetMarketWatch"
+    "?market=0&industrialGroup=&paperTypes%5B0%5D=1&paperTypes%5B1%5D=2"
+    "&paperTypes%5B2%5D=3&paperTypes%5B3%5D=4&paperTypes%5B4%5D=5"
+    "&paperTypes%5B5%5D=6&paperTypes%5B6%5D=7&paperTypes%5B7%5D=8"
+    "&paperTypes%5B8%5D=9&showTraded=false&withBestLimits=false&hEven=0&RefID=0"
+)
 OUT = Path("data/iran_market_live.json")
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126 Safari/537.36",
-    "Accept": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/octet-stream,text/plain,*/*",
+    "Accept": "application/json,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/octet-stream,text/plain,*/*",
+    "Referer": "https://tsetmc.com/",
 }
 NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 
@@ -70,9 +78,7 @@ def read_xlsx(content: bytes) -> list[list[str]]:
             root = ET.fromstring(zf.read("xl/sharedStrings.xml"))
             for si in root.findall(f"{{{NS}}}si"):
                 shared.append("".join(t.text or "" for t in si.iter(f"{{{NS}}}t")))
-        sheets = sorted(
-            n for n in names if re.fullmatch(r"xl/worksheets/sheet\d+\.xml", n)
-        )
+        sheets = sorted(n for n in names if re.fullmatch(r"xl/worksheets/sheet\d+\.xml", n))
         if not sheets:
             raise RuntimeError("workbook has no worksheet")
         root = ET.fromstring(zf.read(sheets[0]))
@@ -140,18 +146,7 @@ def parse_excel(content: bytes):
         previous = num(get(row, "py"))
         if price is None and last is None:
             continue
-        symbols[symbol] = build_item(
-            symbol,
-            get(row, "inscode"),
-            get(row, "iid"),
-            price,
-            last,
-            previous,
-            num(get(row, "pmax")),
-            num(get(row, "pmin")),
-            num(get(row, "tvol")),
-            get(row, "heven"),
-        )
+        symbols[symbol] = build_item(symbol, get(row, "inscode"), get(row, "iid"), price, last, previous, num(get(row, "pmax")), num(get(row, "pmin")), num(get(row, "tvol")), get(row, "heven"))
     return symbols
 
 
@@ -173,17 +168,52 @@ def parse_legacy_text(content: bytes):
         previous = num(fields[13])
         if closing is None and last is None:
             continue
+        symbols[symbol] = build_item(symbol, fields[0], None, closing, last, previous, num(fields[12]), num(fields[11]), num(fields[9]), fields[0])
+    return symbols
+
+
+def _first(record, *names):
+    for name in names:
+        value = record.get(name)
+        if value not in (None, "", "-"):
+            return value
+    return None
+
+
+def parse_cdn_marketwatch(content: bytes):
+    payload = json.loads(content.decode("utf-8-sig"))
+    rows = payload.get("marketwatch") if isinstance(payload, dict) else None
+    if rows is None and isinstance(payload, dict):
+        for value in payload.values():
+            if isinstance(value, list):
+                rows = value
+                break
+    if not isinstance(rows, list):
+        raise RuntimeError("CDN MarketWatch response has no marketwatch array")
+
+    symbols = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        symbol = str(_first(row, "lVal18AFC", "lVal18AfC", "symbol", "instrumentName") or "").strip()
+        if not symbol:
+            continue
+        closing = num(_first(row, "pClosing", "closingPrice", "closingprice"))
+        last = num(_first(row, "pDrCotVal", "lastPrice", "lastprice")) or closing
+        previous = num(_first(row, "priceYesterday", "yesterdayPrice", "py"))
+        if closing is None and last is None:
+            continue
         symbols[symbol] = build_item(
             symbol,
-            fields[0],
-            None,
+            _first(row, "insCode", "inscode", "instrumentId"),
+            _first(row, "isin", "ISIN"),
             closing,
             last,
             previous,
-            num(fields[12]),
-            num(fields[11]),
-            num(fields[9]),
-            fields[0],
+            num(_first(row, "priceMax", "pMax")),
+            num(_first(row, "priceMin", "pMin")),
+            num(_first(row, "qTotTran5J", "tradeVolume", "volume")),
+            _first(row, "hEven", "heven") or "",
         )
     return symbols
 
@@ -193,9 +223,10 @@ def fetch_full_market():
     session = requests.Session()
     session.headers.update(HEADERS)
 
+    # Preferred legacy XLSX sources when reachable.
     for url in EXCEL_URLS:
         try:
-            response = session.get(url, timeout=(15, 45), allow_redirects=True)
+            response = session.get(url, timeout=(8, 25), allow_redirects=True)
             response.raise_for_status()
             symbols = parse_excel(response.content)
             if len(symbols) >= 100:
@@ -204,9 +235,20 @@ def fetch_full_market():
         except Exception as exc:
             errors.append(f"{url}: {type(exc).__name__}: {exc}")
 
+    # GitHub Actions can reach cdn.tsetmc.com even when old.tsetmc.com is unreachable.
+    try:
+        response = session.get(CDN_MARKETWATCH_URL, timeout=(8, 30), allow_redirects=True)
+        response.raise_for_status()
+        symbols = parse_cdn_marketwatch(response.content)
+        if len(symbols) >= 100:
+            return symbols, f"tsetmc-cdn-marketwatch:{CDN_MARKETWATCH_URL}"
+        errors.append(f"{CDN_MARKETWATCH_URL}: only {len(symbols)} symbols")
+    except Exception as exc:
+        errors.append(f"{CDN_MARKETWATCH_URL}: {type(exc).__name__}: {exc}")
+
     for url in TEXT_URLS:
         try:
-            response = session.get(url, timeout=(15, 45), allow_redirects=True)
+            response = session.get(url, timeout=(8, 25), allow_redirects=True)
             response.raise_for_status()
             symbols = parse_legacy_text(response.content)
             if len(symbols) >= 100:
