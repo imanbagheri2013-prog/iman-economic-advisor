@@ -31,6 +31,18 @@ jobs:
       - name: Install requests
         run: python -m pip install requests
 
+      - name: Restore last valid market mirror
+        run: |
+          set -e
+          git fetch origin market-data
+          mkdir -p data
+          if git cat-file -e origin/market-data:data/iran_market_live.json 2>/dev/null; then
+            git show origin/market-data:data/iran_market_live.json > data/iran_market_live.json
+            echo "Restored previous valid market mirror as outage-safe baseline."
+          else
+            echo "No previous market mirror exists yet."
+          fi
+
       - name: Harden market-data source access
         run: |
           python - <<'PY'
@@ -47,8 +59,10 @@ jobs:
           PY
 
       - name: Fetch full Iran market universe
+        continue-on-error: true
+        id: fetch_market
         run: |
-          set -e
+          set +e
           last_status=1
           for attempt in 1 2 3; do
             echo "Iran market fetch attempt ${attempt}/3"
@@ -61,7 +75,27 @@ jobs:
               sleep $((attempt * 15))
             fi
           done
+          if [ "$last_status" -ne 0 ]; then
+            echo "::warning::Iran market upstreams were unavailable; preserving the last valid mirror. Data Health must treat this snapshot as stale."
+          fi
           exit "$last_status"
+
+      - name: Verify mirror payload
+        run: |
+          set -e
+          test -s data/iran_market_live.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path("data/iran_market_live.json")
+          data = json.loads(p.read_text(encoding="utf-8"))
+          symbols = data.get("symbols") or {}
+          if not isinstance(symbols, dict) or not symbols:
+              raise SystemExit("market mirror exists but contains no symbols")
+          print(f"Mirror payload valid: {len(symbols)} symbols")
+          print(f"Generated at: {data.get('generated_at')}")
+          print(f"Source: {data.get('source')}")
+          PY
 
       - name: Publish mirror branch
         env:
@@ -70,8 +104,12 @@ jobs:
           set -e
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git fetch origin market-data || true
-          git checkout -B market-data
+          git checkout -B market-data origin/market-data
+          git checkout main -- data/iran_market_live.json
           git add data/iran_market_live.json
           git commit -m "Update full Iran market data mirror" || echo "No data changes"
           git push origin HEAD:market-data --force
+
+      - name: Report upstream outage without failing mirror publication
+        if: steps.fetch_market.outcome == 'failure'
+        run: echo "::warning::Published the last valid Iran market mirror because upstream market sources timed out."
