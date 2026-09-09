@@ -30,6 +30,9 @@ def test_stale_snapshot_can_never_be_actionable():
     assert signal.market_state == "STALE"
     assert signal.confidence == 0
     assert signal.data_fresh is False
+    assert signal.entry_price is None
+    assert signal.stop_loss is None
+    assert signal.take_profit is None
 
 
 def test_missing_previous_close_is_no_trade():
@@ -51,6 +54,42 @@ def test_volume_and_range_contribute_to_score():
     assert any("volume_ratio" in reason for reason in signal.reasons)
 
 
+def test_actionable_buy_signal_exposes_two_risk_levels():
+    signal = analyze_snapshot(fresh_snapshot(price=110.0, previous_close=100.0, low=105.0))
+    assert signal.action == "BUY"
+    assert signal.entry_price == 110.0
+    assert signal.stop_loss == 105.0
+    assert signal.take_profit == 120.0
+    assert signal.risk_reward == 2.0
+
+
+def test_actionable_sell_signal_exposes_two_risk_levels():
+    signal = analyze_snapshot(fresh_snapshot(price=90.0, previous_close=100.0, high=95.0))
+    assert signal.action == "SELL"
+    assert signal.entry_price == 90.0
+    assert signal.stop_loss == 95.0
+    assert signal.take_profit == 80.0
+    assert signal.risk_reward == 2.0
+
+
+def test_closed_market_signal_has_advisory_levels_but_no_live_action():
+    signal = analyze_snapshot(
+        fresh_snapshot(
+            price=110.0,
+            previous_close=100.0,
+            market_status="CLOSED",
+            observed_at=datetime.now(timezone.utc) - timedelta(hours=1),
+            low=105.0,
+        )
+    )
+    assert signal.action == "NO_TRADE"
+    assert signal.analysis_action == "BUY"
+    assert signal.entry_price == 110.0
+    assert signal.stop_loss == 105.0
+    assert signal.take_profit == 120.0
+    assert signal.risk_reward == 2.0
+
+
 def test_batch_analysis_exposes_safety_contract():
     report = analyze_snapshots(
         [
@@ -64,3 +103,4 @@ def test_batch_analysis_exposes_safety_contract():
     assert report["count"] == 2
     assert report["actionable_count"] == 1
     assert report["safety"]["stale_data_action"] == "NO_TRADE"
+    assert report["safety"]["risk_levels_action"] == "ADVISORY_ONLY"
