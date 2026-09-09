@@ -80,7 +80,7 @@ jobs:
           fi
           exit "$last_status"
 
-      - name: Verify mirror payload
+      - name: Verify full-universe mirror payload
         run: |
           set -e
           test -s data/iran_market_live.json
@@ -90,9 +90,17 @@ jobs:
           p = Path("data/iran_market_live.json")
           data = json.loads(p.read_text(encoding="utf-8"))
           symbols = data.get("symbols") or {}
+          mode = data.get("universe_mode")
+          count = int(data.get("universe_count") or len(symbols))
           if not isinstance(symbols, dict) or not symbols:
               raise SystemExit("market mirror exists but contains no symbols")
-          print(f"Mirror payload valid: {len(symbols)} symbols")
+          if mode != "FULL_MARKET":
+              raise SystemExit(f"market mirror is not full-universe: universe_mode={mode!r}")
+          if count < 100:
+              raise SystemExit(f"market mirror universe is implausibly small: universe_count={count}")
+          if count != len(symbols):
+              raise SystemExit(f"market mirror universe_count mismatch: metadata={count}, symbols={len(symbols)}")
+          print(f"Full-market mirror payload valid: {count} symbols")
           print(f"Generated at: {data.get('generated_at')}")
           print(f"Source: {data.get('source')}")
           PY
@@ -105,12 +113,9 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          # Preserve the generated/restored payload outside the main worktree.
           mkdir -p "$RUNNER_TEMP/iran-market-mirror"
           cp data/iran_market_live.json "$RUNNER_TEMP/iran-market-mirror/iran_market_live.json"
 
-          # The fetch step patches the script in-place, so reset the worktree before
-          # switching branches; otherwise checkout is blocked by dirty/untracked files.
           git reset --hard HEAD
           git clean -fd data
           git checkout -B market-data origin/market-data
