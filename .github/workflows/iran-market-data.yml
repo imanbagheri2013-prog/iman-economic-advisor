@@ -7,6 +7,7 @@ on:
   push:
     paths:
       - "scripts/publish_iran_market_data.py"
+      - "scripts/publish_iran_market_full_xlsx.py"
       - ".github/workflows/iran-market-data.yml"
 
 permissions:
@@ -43,21 +44,6 @@ jobs:
             echo "No previous market mirror exists yet."
           fi
 
-      - name: Harden market-data source access
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          p = Path("scripts/publish_iran_market_data.py")
-          s = p.read_text(encoding="utf-8")
-          s = s.replace(
-              'CDN_MARKETWATCH_URL = "https://cdn.tsetmc.com/api/ClosingPrice/GetMarketWatch"',
-              'CDN_MARKETWATCH_URL = "https://cdn.tsetmc.com/api/ClosingPrice/GetMarketWatch?market=0&paperTypes%5B0%5D=1&paperTypes%5B1%5D=2&paperTypes%5B2%5D=3&paperTypes%5B3%5D=4&paperTypes%5B4%5D=5&paperTypes%5B5%5D=6&paperTypes%5B6%5D=7&paperTypes%5B7%5D=8&paperTypes%5B8%5D=9&showTraded=false&withBestLimits=false&hEven=0&RefID=0"',
-          )
-          s = s.replace('timeout=(4, 10)', 'timeout=(15, 30)')
-          s = s.replace('timeout=(4, 8)', 'timeout=(15, 30)')
-          p.write_text(s, encoding="utf-8")
-          PY
-
       - name: Fetch full Iran market universe
         id: fetch_market
         run: |
@@ -65,8 +51,8 @@ jobs:
           fetch_ok=false
 
           for attempt in 1 2 3; do
-            echo "Iran market fetch attempt ${attempt}/3"
-            python scripts/publish_iran_market_data.py
+            echo "Iran market Full-Market Excel fetch attempt ${attempt}/3"
+            python scripts/publish_iran_market_full_xlsx.py
             rc=$?
 
             if [ "$rc" -eq 0 ]; then
@@ -74,7 +60,7 @@ jobs:
               break
             fi
 
-            echo "Iran market fetch attempt ${attempt} failed with exit code ${rc}."
+            echo "Iran market Full-Market Excel attempt ${attempt} failed with exit code ${rc}."
             if [ "$attempt" -lt 3 ]; then
               sleep $((attempt * 15))
             fi
@@ -82,10 +68,10 @@ jobs:
 
           if [ "$fetch_ok" = "true" ]; then
             echo "fetch_ok=true" >> "$GITHUB_OUTPUT"
-            echo "Iran market full-universe fetch succeeded."
+            echo "Iran market Full-Market Excel fetch succeeded."
           else
             echo "fetch_ok=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::Iran market upstreams were unavailable; preserving the last valid mirror. Data Health must treat this snapshot as stale."
+            echo "::warning::Iran Full-Market Excel upstream was unavailable; preserving the last valid mirror. Data Health must treat this snapshot as stale."
           fi
 
           exit 0
@@ -111,6 +97,10 @@ jobs:
               raise SystemExit(f"market mirror universe is implausibly small: universe_count={count}")
           if count != len(symbols):
               raise SystemExit(f"market mirror universe_count mismatch: metadata={count}, symbols={len(symbols)}")
+          for symbol, item in symbols.items():
+              info = item.get("instrument_info") or {}
+              if info.get("pClosing") is None or info.get("priceYesterday") is None:
+                  raise SystemExit(f"analysis-required price fields missing for {symbol}")
           print(f"Full-market mirror payload valid: {count} symbols")
           print(f"Generated at: {data.get('generated_at')}")
           print(f"Source: {data.get('source')}")
@@ -142,4 +132,4 @@ jobs:
         if: steps.fetch_market.outputs.fetch_ok == 'false'
         run: echo "::warning::Upstream Iran market sources timed out; no non-full-universe snapshot was published. The existing mirror remains unchanged and Data Health must treat it according to its freshness."
 
-# Full-Market execution trigger: verify resilient upstream fallback now.
+# Full-Market execution trigger: use the verified legacy Excel market-watch source.
