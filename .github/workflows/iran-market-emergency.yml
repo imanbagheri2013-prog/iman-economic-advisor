@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - ".github/workflows/iran-market-emergency.yml"
+      - "scripts/fetch_iran_market_via_proxy.py"
   workflow_dispatch:
 
 permissions:
