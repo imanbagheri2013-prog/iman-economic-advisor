@@ -13,7 +13,7 @@ LEGACY_MARKETWATCH_URL = "http://old.tsetmc.com/tsev2/data/MarketWatchPlus.aspx"
 
 
 class IranMarketMirrorProvider:
-    """Read the latest TSETMC snapshot collected by GitHub Actions."""
+    """Read the latest TSETMC-derived snapshot collected by GitHub Actions."""
 
     def __init__(self, url: str | None = None, timeout: float = 12.0) -> None:
         self.url = (url or os.getenv("IEA_IRAN_MARKET_MIRROR_URL", DEFAULT_MIRROR_URL)).strip()
@@ -46,18 +46,24 @@ class IranMarketMirrorProvider:
             raise ValueError(f"Iran market mirror has no quote for {symbol}")
         data_date = _date_string(latest.get("dEven")) or _date_string(info.get("dEven"))
         epoch = _epoch_from_tsetmc(data_date, latest.get("hEven") or info.get("hEven"))
+        if epoch is None:
+            epoch = _parse_generated_at(payload.get("generated_at"))
         observed_at = datetime.fromtimestamp(epoch, tz=timezone.utc) if epoch else datetime.now(timezone.utc)
         price = _number(latest.get("pClosing", latest.get("pDrCotVal", info.get("pClosing"))))
         if price is None:
             raise ValueError(f"closing price missing for {symbol}")
         previous = _number(latest.get("priceYesterday", info.get("priceYesterday")))
         volume = _number(latest.get("qTotTran5J", info.get("qTotTran5J")))
+        quote_status = str(info.get("quoteStatus") or "ACTIVE").upper()
+        market_status = str(payload.get("market_status") or "CLOSED").upper()
+        if quote_status != "ACTIVE":
+            market_status = "SUSPENDED"
         return MarketSnapshot(
             symbol=str(instrument.get("lVal18AFC") or symbol).strip(), observed_at=observed_at,
             price=price, previous_close=previous, volume=volume,
             high=_number(latest.get("priceMax", info.get("priceMax"))),
             low=_number(latest.get("priceMin", info.get("priceMin"))),
-            source="tsetmc-github-actions", market_status="CLOSED", data_date=data_date,
+            source="tsetmc-github-actions", market_status=market_status, data_date=data_date,
         )
 
 
@@ -104,7 +110,7 @@ class LegacyTsetmcMarketProvider:
             symbol=symbol, observed_at=observed_at, price=price,
             previous_close=previous, volume=_number(fields[9]),
             high=_number(fields[12]), low=_number(fields[11]),
-            source="tsetmc-legacy-marketwatch", market_status="CLOSED", data_date=data_date,
+            source="tsetmc-legacy-marketwatch", market_status="OPEN", data_date=data_date,
         )
 
 
@@ -120,6 +126,18 @@ def _date_string(value: Any) -> str | None:
         return None
     text = str(value)
     return text if len(text) == 8 and text.isdigit() else None
+
+
+def _parse_generated_at(value: Any) -> float | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.timestamp()
+    except (TypeError, ValueError, OverflowError):
+        return None
 
 
 def _epoch_from_tsetmc(data_date: str | None, h_even: Any) -> float | None:
