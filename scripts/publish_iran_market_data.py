@@ -60,16 +60,41 @@ def fetch_tindex_history(session: requests.Session, symbol: str) -> tuple[float 
     marker = "تاریخ | بازگشایی | بیشترین | کمترین | پایانی | تغییر"
     if marker not in text:
         return None, None
+
     tail = text.split(marker, 1)[1]
-    row_pattern = re.compile(rf"((?:[۰-۹0-9]{{1,2}})\s+(?:{PERSIAN_MONTHS})\s+[۰-۹0-9]{{4}})\s*\|\s*([^|]+)\|\s*([^|]+)\|\s*([^|]+)\|\s*([^|]+)\|\s*([^|]+)")
+    date_pattern = re.compile(rf"^(?:[۰-۹0-9]{{1,2}})\s+(?:{PERSIAN_MONTHS})\s+[۰-۹0-9]{{4}}$")
     rows: list[tuple[str, float | None]] = []
-    for match in row_pattern.finditer(tail):
-        rows.append((match.group(1).strip(), number(match.group(5))))
+
+    # Parse the rendered table by columns instead of relying on a single
+    # regex. TIndex occasionally changes whitespace/number formatting while
+    # keeping the stable six-column table contract.
+    for chunk in tail.split(" | "):
+        pass
+
+    tokens = tail.split(" | ")
+    for index in range(0, len(tokens) - 5, 6):
+        date_text = tokens[index].strip()
+        if not date_pattern.match(date_text):
+            continue
+        close_text = tokens[index + 4].strip()
+        rows.append((date_text, number(close_text)))
+
+    if not rows:
+        # Fallback for HTML-to-text renderers that normalize table cells
+        # differently: inspect line-like table rows directly.
+        row_pattern = re.compile(rf"({PERSIAN_MONTHS})")
+        for line in re.split(r"\n+", tail):
+            parts = [part.strip() for part in line.split("|")]
+            if len(parts) >= 6 and row_pattern.search(parts[0]):
+                rows.append((parts[0], number(parts[4])))
+
     if not rows:
         return None, None
+
     positive = [(date, close) for date, close in rows if close is not None and close > 0]
     if not positive:
         return None, None
+
     # If today's row traded, the next positive row is yesterday's close.
     # If today's row is a suspension/no-trade row (close=0), the first
     # positive row is already the latest valid prior trading close.
