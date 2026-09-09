@@ -3,11 +3,11 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from .confidence import clamp_confidence, combine_confidence, coverage_confidence, freshness_confidence, sample_confidence
+from .confidence import combine_confidence, coverage_confidence, freshness_confidence, sample_confidence
 from .decision import build_decision
 from .intelligence import analyze
 from .intelligence_v2 import FactorRegistry, FactorResult, aggregate
-from .iran_market import IranMarketAdapter, iran_factor_adapters
+from .iran_market import IranMarketAdapter, MirrorIranMarketAdapter, iran_factor_adapters
 from .market_adapters import ResilientMarketAdapter, crypto_factor_adapters
 from .news import GDELTNewsAdapter, news_risk_factor
 from .sentiment import AlternativeFearGreedAdapter, sentiment_factor
@@ -20,6 +20,7 @@ _PROVIDER_BASE_CONFIDENCE = {
     "ALTERNATIVE_ME": 0.85,
     "GDELT": 0.80,
     "TSETMC_CDN": 0.85,
+    "TSETMC_GITHUB_MIRROR": 0.82,
 }
 
 _FACTOR_MAX_AGE_HOURS = {
@@ -42,17 +43,10 @@ _FACTOR_REQUIRED_FIELDS = {
     "sentiment": ("value", "classification"),
 }
 
-_FACTOR_SAMPLE_TARGETS = {
-    "trend": 25,
-    "volume": 25,
-    "liquidity": 20,
-    "open_interest": 2,
-    "funding_rate": 1,
-}
+_FACTOR_SAMPLE_TARGETS = {"trend": 25, "volume": 25, "liquidity": 20, "open_interest": 2, "funding_rate": 1}
 
 
 def _dynamic_confidence(result: FactorResult) -> float:
-    """Derive factor confidence from provider, freshness, completeness, and sample depth."""
     if result.status != "OK":
         return 0.0
     details = result.details or {}
@@ -63,10 +57,9 @@ def _dynamic_confidence(result: FactorResult) -> float:
     required = _FACTOR_REQUIRED_FIELDS.get(result.name)
     if required:
         alternatives = {
-            "trend": (("return_4h_pct", "return_24h_pct"), ("return_1d_pct", "return_20d_pct")),
+            "trend": (("return_4h_pct", "return_24h_pct"), ("return_1d_pct", "return_20d_pct"), ("return_1d_pct",)),
             "volume": (("relative_volume_1h",), ("market_volume", "breadth_up_pct", "breadth_down_pct")),
-            "liquidity": (("bid_depth_usd", "ask_depth_usd", "depth_imbalance"),
-                          ("bid_depth_value", "ask_depth_value", "depth_imbalance")),
+            "liquidity": (("bid_depth_usd", "ask_depth_usd", "depth_imbalance"), ("bid_depth_value", "ask_depth_value", "depth_imbalance")),
         }.get(result.name, (required,))
         best_present = 0
         best_target = len(required)
@@ -109,7 +102,7 @@ def analyze_eight_factor(
         market = market_adapter
         trend, volume, liquidity, open_interest, funding_rate = crypto_factor_adapters(market)
     elif region in {"IR", "IRAN", "TSE", "TSETMC"}:
-        market = IranMarketAdapter()
+        market = MirrorIranMarketAdapter()
         trend, volume, liquidity, open_interest, funding_rate = iran_factor_adapters(market)
     else:
         market = ResilientMarketAdapter()
