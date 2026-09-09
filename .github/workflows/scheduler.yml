@@ -68,7 +68,7 @@ jobs:
 
       - name: Upload scheduler report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: scheduler-health-report
           path: health_report.json
@@ -100,7 +100,7 @@ jobs:
 
       - name: Upload latest valid Iran market state
         if: success() && steps.validate-market-state.outputs.valid == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: iran-market-state
           path: iran_market_state.json
