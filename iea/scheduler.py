@@ -190,7 +190,11 @@ def _live_equity_symbol() -> str | None:
     return raw.strip().upper() if raw and raw.strip() else None
 
 
-def _build_equity_cycle(intelligence: dict, live_market: dict, capital: float | None) -> dict | None:
+def _build_equity_cycle(intelligence: dict, capital: float | dict | None, live_market: dict | None = None) -> dict | None:
+    """Build the equity advisor report while preserving the historical two-argument helper API."""
+    if isinstance(capital, dict):
+        capital, live_market = live_market, capital
+
     path = _equity_payload_path()
     if path is not None and path.exists():
         payload = load_equity_payload(path)
@@ -306,7 +310,7 @@ def run() -> int:
         intelligence["live_market_intelligence"] = live_market
         intelligence["actionable_shortlist_symbols"] = live_market.get("actionable_shortlist_symbols", [])
         intelligence["top_signal"] = live_market.get("top_signal")
-        equity_cycle = _build_equity_cycle(intelligence, live_market, capital)
+        equity_cycle = _build_equity_cycle(intelligence, capital, live_market)
         central_bank = _central_bank_report(store, config)
         if pipeline_status != "OK":
             status, exit_code = "error", 1
