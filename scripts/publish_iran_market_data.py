@@ -53,41 +53,34 @@ def parse_scaled_number(raw: str | None, unit: str | None) -> float | None:
     return None if value is None else value * {"هزار": 1_000.0, "میلیون": 1_000_000.0, "میلیارد": 1_000_000_000.0}.get(unit or "", 1.0)
 
 
-def fetch_tindex_history(session: requests.Session, symbol: str) -> tuple[float | None, str | None]:
-    response = session.get(TINDEX_BASE + quote(symbol, safe="") + "/history/", headers=HEADERS, timeout=(4, 8))
-    response.raise_for_status()
-    text = html_text(response.text)
-    marker = "تاریخ | بازگشایی | بیشترین | کمترین | پایانی | تغییر"
-    if marker not in text:
+def parse_tindex_history_text(text: str) -> tuple[float | None, str | None]:
+    marker_pattern = re.compile(r"تاریخ\s*\|?\s*بازگشایی\s*\|?\s*بیشترین\s*\|?\s*کمترین\s*\|?\s*پایانی\s*\|?\s*تغییر")
+    marker_match = marker_pattern.search(text)
+    if not marker_match:
         return None, None
-
-    tail = text.split(marker, 1)[1]
+    tail = text[marker_match.end():]
     date_pattern = re.compile(rf"[۰-۹0-9]{{1,2}}\s+(?:{PERSIAN_MONTHS})\s+[۰-۹0-9]{{4}}")
     date_matches = list(date_pattern.finditer(tail))
     rows: list[tuple[str, float | None]] = []
-
-    # TIndex renders the history table as whitespace-separated text after
-    # HTML stripping. Parse each dated row by taking the four numeric price
-    # columns that follow the date; this survives changes in whitespace and
-    # table-cell separators.
     for index, match in enumerate(date_matches):
         segment_end = date_matches[index + 1].start() if index + 1 < len(date_matches) else len(tail)
         segment = tail[match.end():segment_end]
         numeric_tokens = re.findall(r"[۰-۹0-9][۰-۹0-9٬,٫.]*", segment)
         close = number(numeric_tokens[3]) if len(numeric_tokens) >= 4 else None
         rows.append((match.group(0), close))
-
-    if not rows:
-        return None, None
-
     positive = [(date, close) for date, close in rows if close is not None and close > 0]
     if not positive:
         return None, None
-
-    first_close = rows[0][1]
+    first_close = rows[0][1] if rows else None
     if first_close is not None and first_close > 0:
         return (positive[1] if len(positive) >= 2 else positive[0])
     return positive[0]
+
+
+def fetch_tindex_history(session: requests.Session, symbol: str) -> tuple[float | None, str | None]:
+    response = session.get(TINDEX_BASE + quote(symbol, safe="") + "/history/", headers=HEADERS, timeout=(4, 8))
+    response.raise_for_status()
+    return parse_tindex_history_text(html_text(response.text))
 
 
 def fetch_tindex(requested: list[str]) -> tuple[dict[str, dict[str, Any]], str]:
@@ -103,7 +96,12 @@ def fetch_tindex(requested: list[str]) -> tuple[dict[str, dict[str, Any]], str]:
         volume_match = re.search(r"حجم\s*([0-9۰-۹٬,.]+)\s*(هزار|میلیون|میلیارد)?", text)
         if not last_match and not close_match:
             raise RuntimeError(f"Tindex returned no live price for {symbol}")
-        previous, previous_date = fetch_tindex_history(session, symbol)
+        previous, previous_date = parse_tindex_history_text(text)
+        if previous is None:
+            try:
+                previous, previous_date = fetch_tindex_history(session, symbol)
+            except Exception:
+                previous, previous_date = None, None
         volume = parse_scaled_number(volume_match.group(1), volume_match.group(2)) if volume_match else None
         rows[symbol] = {"l18": symbol, "pl": last_match.group(1) if last_match else close_match.group(1), "pc": close_match.group(1) if close_match else last_match.group(1), "py": previous, "previous_date": previous_date, "volume": volume, "quote_status": "ACTIVE" if volume is not None and volume > 0 else "SUSPENDED_OR_NO_TRADE", "source": "tindex"}
     return rows, "tindex-live"
@@ -200,7 +198,7 @@ def main() -> None:
             errors[symbol] = "price missing"
             continue
         quote_status = row.get("quote_status") or ("ACTIVE" if volume is not None and volume > 0 else "SUSPENDED_OR_NO_TRADE")
-        symbols[symbol] = {"instrument": {"lVal18AFC": symbol, "insCode": row.get("insCode") or row.get("ins_code")}, "instrument_info": {"pClosing": price, "pDrCotVal": last or price, "priceYesterday": previous, "qTotTran5J": volume, "priceMax": high, "priceMin": low, "previousDate": row.get("previous_date"), "quoteStatus": quote_status}, "daily": [], "client_type_history": [], "major_shareholders": [], "codal_filings": [], "statement_content": [], "share_changes": []}
+        symbols[symbol] = {"instrument": {"lVal18AFC": symbol, "insCode": row.get("insCode") or row.get("ins_code")}, "instrument_info": {"pClosing": price, "pDrCotVal": last or price, "priceYesterday": previous, "priceMax": high, "priceMin": low, "qTotTran5J": volume, "previousDate": row.get("previous_date"), "quoteStatus": quote_status}, "daily": [], "client_type_history": [], "major_shareholders": [], "codal_filings": [], "statement_content": [], "share_changes": []}
     payload = {"generated_at": datetime.now(timezone.utc).isoformat(), "source": f"{source}:github-actions", "market_status": market_status(), "symbols": symbols, "errors": errors}
     output.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     if len(symbols) != len(requested):
