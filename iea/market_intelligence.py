@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from math import tanh
 from typing import Any, Iterable, Optional
 
 
@@ -105,6 +106,45 @@ def _risk_levels(snapshot: MarketSnapshot, analysis_action: str) -> tuple[float 
     return round(entry, 4), round(stop, 4), round(target, 4), 2.0
 
 
+def _signal_score(snapshot: MarketSnapshot, change: float) -> tuple[float, list[str]]:
+    """Score directional evidence while avoiding oversized one-factor signals."""
+    reasons: list[str] = [f"price_change={change:.2f}%"]
+
+    # Smooth the price-change contribution: a very large move should add conviction,
+    # but should not by itself max out the signal. This reduces false positives from
+    # isolated price jumps while preserving strong directional moves.
+    score = 60.0 * tanh(change / 3.0)
+
+    if snapshot.volume is not None and snapshot.average_volume and snapshot.average_volume > 0:
+        volume_ratio = snapshot.volume / snapshot.average_volume
+        if volume_ratio >= 1.2:
+            volume_component = min(20.0, (volume_ratio - 1.0) * 12.0)
+            score += volume_component if change > 0 else -volume_component
+            reasons.append(f"volume_ratio={volume_ratio:.2f}")
+        elif volume_ratio <= 0.8:
+            score *= 0.85
+            reasons.append(f"low_volume_ratio={volume_ratio:.2f}")
+
+    if snapshot.high is not None and snapshot.low is not None and snapshot.high >= snapshot.low:
+        range_size = snapshot.high - snapshot.low
+        if range_size > 0:
+            position = (snapshot.price - snapshot.low) / range_size
+            if position >= 0.8:
+                score += 5.0
+                reasons.append("price near session high")
+            elif position <= 0.2:
+                score -= 5.0
+                reasons.append("price near session low")
+
+    # Small moves without confirmation should remain WAIT rather than becoming
+    # executable signals from noise alone.
+    if abs(change) < 1.0:
+        score *= 0.5
+        reasons.append("small price move; confirmation required")
+
+    return max(-100.0, min(100.0, score)), reasons
+
+
 def analyze_snapshot(snapshot: MarketSnapshot) -> MarketSignal:
     """Analyze live and closed snapshots without treating suspended symbols as market-wide closure."""
     observed = snapshot.observed_at
@@ -136,29 +176,11 @@ def analyze_snapshot(snapshot: MarketSnapshot) -> MarketSignal:
             market_status=snapshot.market_status, data_date=snapshot.data_date,
         )
 
-    score = max(-100.0, min(100.0, change * 20.0))
-    reasons: list[str] = [f"price_change={change:.2f}%"]
-    if snapshot.volume is not None and snapshot.average_volume and snapshot.average_volume > 0:
-        volume_ratio = snapshot.volume / snapshot.average_volume
-        if volume_ratio >= 1.5:
-            score += 15.0 if change > 0 else -15.0
-            reasons.append(f"volume_ratio={volume_ratio:.2f}")
-    if snapshot.high is not None and snapshot.low is not None and snapshot.high >= snapshot.low:
-        range_size = snapshot.high - snapshot.low
-        if range_size > 0:
-            position = (snapshot.price - snapshot.low) / range_size
-            if position >= 0.8:
-                score += 5.0
-                reasons.append("price near session high")
-            elif position <= 0.2:
-                score -= 5.0
-                reasons.append("price near session low")
-
-    score = max(-100.0, min(100.0, score))
+    score, reasons = _signal_score(snapshot, change)
     confidence = min(100.0, abs(score))
-    if score >= 30:
+    if score >= 45:
         analysis_action, state = "BUY", "BULLISH"
-    elif score <= -30:
+    elif score <= -45:
         analysis_action, state = "SELL", "BEARISH"
     else:
         analysis_action, state = "WAIT", "NEUTRAL"
