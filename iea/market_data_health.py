@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, time, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import requests
 
 OPEN_MAX_AGE_SECONDS = 30 * 60
 CLOSED_MAX_AGE_SECONDS = 48 * 60 * 60
+TEHRAN = ZoneInfo("Asia/Tehran")
 
 
 def _number(value: Any) -> float | None:
@@ -24,6 +26,28 @@ def _age_seconds(value: Any) -> float | None:
         if parsed.tzinfo is None:
             parsed = parsed.replace(tzinfo=timezone.utc)
         return max(0.0, (datetime.now(timezone.utc) - parsed).total_seconds())
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def _quote_age_seconds(row: dict[str, Any]) -> float | None:
+    """Return age of the latest TSETMC quote when its date/time is available."""
+    info = row.get("instrument_info") or {}
+    daily = [item for item in row.get("daily", []) if isinstance(item, dict)]
+    latest = daily[0] if daily else info
+    data_date = latest.get("dEven") or info.get("dEven")
+    h_even = latest.get("hEven") or info.get("hEven")
+    if not data_date:
+        return None
+    try:
+        raw = int(h_even or 0)
+        hour, minute, second = raw // 10000, (raw // 100) % 100, raw % 100
+        observed = datetime.combine(
+            datetime.strptime(str(data_date), "%Y%m%d").date(),
+            time(hour, minute, second),
+            tzinfo=TEHRAN,
+        ).astimezone(timezone.utc)
+        return max(0.0, (datetime.now(timezone.utc) - observed).total_seconds())
     except (TypeError, ValueError, OverflowError):
         return None
 
@@ -54,6 +78,7 @@ def check_market_mirror_health(
         "invalid_symbols": [],
         "missing_required_data": [],
         "suspended_symbols": [],
+        "stale_symbols": [],
         "errors": [],
     }
 
@@ -113,6 +138,11 @@ def check_market_mirror_health(
                 result["missing_required_data"].append({"symbol": symbol, "fields": missing})
                 continue
             result["valid_symbols"].append(symbol)
+            quote_age = _quote_age_seconds(row)
+            if quote_status == "ACTIVE" and quote_age is not None and quote_age > limit:
+                result["stale_symbols"].append(symbol)
+                result["errors"].append(f"symbol snapshot is stale: symbol={symbol} age_seconds={round(quote_age, 2)}")
+                continue
             if quote_status == "ACTIVE":
                 result["analysis_ready_symbols"].append(symbol)
 

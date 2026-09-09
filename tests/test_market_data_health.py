@@ -47,6 +47,24 @@ def test_market_mirror_health_blocks_stale_open_snapshot():
     assert any("stale" in error for error in result["errors"])
 
 
+def test_market_mirror_health_blocks_stale_active_symbol_even_when_mirror_is_fresh():
+    old_date = (datetime.now(timezone.utc) - timedelta(hours=2)).astimezone(timezone.utc)
+    symbols = _payload()["symbols"]
+    symbols["فولاد"]["daily"] = [{
+        "dEven": old_date.astimezone(timezone.utc).strftime("%Y%m%d"),
+        "hEven": int(old_date.strftime("%H%M%S")),
+        "pClosing": 100.0,
+        "priceYesterday": 99.0,
+    }]
+    with patch("iea.market_data_health.requests.get", return_value=_response(_payload(symbols=symbols))):
+        result = check_market_mirror_health("https://example.test/market.json", ["فولاد", "فملی"])
+
+    assert result["status"] == "HEALTHY"
+    assert result["stale_symbols"] == ["فولاد"]
+    assert result["analysis_ready_symbols"] == ["فملی"]
+    assert any("symbol snapshot is stale" in error for error in result["errors"])
+
+
 def test_market_mirror_health_detects_missing_required_price_data():
     symbols = _payload()["symbols"]
     symbols["فملی"]["instrument_info"]["pClosing"] = None
