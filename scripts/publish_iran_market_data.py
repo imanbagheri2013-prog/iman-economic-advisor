@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import time
 from datetime import datetime, timezone
 from html import unescape
 from pathlib import Path
@@ -23,6 +22,7 @@ CDN_PARAMS = {"market": "0", "industrialGroup": "", "paperTypes[0]": "1", "paper
 
 PERSIAN_DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹", "0123456789")
 ARABIC_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
+PERSIAN_MONTHS = r"فروردین|اردیبهشت|خرداد|تیر|مرداد|شهریور|مهر|آبان|آذر|دی|بهمن|اسفند"
 
 
 def normalize_digits(value: Any) -> str:
@@ -67,13 +67,23 @@ def fetch_tindex_history(session: requests.Session, symbol: str) -> tuple[float 
     if marker not in text:
         return None, None
     tail = text.split(marker, 1)[1]
-    rows = [line.strip() for line in tail.split("  ") if line.strip()]
-    # The rendered page normally exposes rows separated by newlines before HTML stripping;
-    # use a direct date/pipe regex as a robust fallback across formatting changes.
-    matches = re.findall(r"([۰-۹0-9]{1,2}\s+[^|]+?)\s*\|\s*[^|]+\|\s*[^|]+\|\s*[^|]+\|\s*([^|]+?)\s*\|", tail)
-    if len(matches) >= 2:
-        return number(matches[1][1]), matches[1][0].strip()
-    return None, None
+    row_pattern = re.compile(
+        rf"((?:[۰-۹0-9]{{1,2}})\s+(?:{PERSIAN_MONTHS})\s+[۰-۹0-9]{{4}})\s*\|\s*([^|]+)\|\s*([^|]+)\|\s*([^|]+)\|\s*([^|]+)\|\s*([^|]+)"
+    )
+    rows: list[tuple[str, float]] = []
+    for match in row_pattern.finditer(tail):
+        closing = number(match.group(5))
+        if closing is not None and closing > 0:
+            rows.append((match.group(1).strip(), closing))
+    if not rows:
+        return None, None
+    # The first valid row is today's trading row when the symbol traded today.
+    # Otherwise it is the latest prior trading day. In both cases, the previous
+    # close is the next valid historical row when available; for a currently
+    # suspended/no-trade symbol the latest valid row is the safest reference.
+    if len(rows) >= 2:
+        return rows[1][1], rows[1][0]
+    return rows[0][1], rows[0][0]
 
 
 def fetch_tindex(requested: list[str]) -> tuple[dict[str, dict[str, Any]], str]:
@@ -91,13 +101,15 @@ def fetch_tindex(requested: list[str]) -> tuple[dict[str, dict[str, Any]], str]:
         if not last_match and not close_match:
             raise RuntimeError(f"Tindex returned no live price for {symbol}")
         previous, previous_date = fetch_tindex_history(session, symbol)
+        volume = parse_scaled_number(volume_match.group(1), volume_match.group(2)) if volume_match else None
         rows[symbol] = {
             "l18": symbol,
             "pl": last_match.group(1) if last_match else close_match.group(1),
             "pc": close_match.group(1) if close_match else last_match.group(1),
             "py": previous,
             "previous_date": previous_date,
-            "volume": parse_scaled_number(volume_match.group(1), volume_match.group(2)) if volume_match else None,
+            "volume": volume,
+            "quote_status": "ACTIVE" if volume is not None and volume > 0 else "SUSPENDED_OR_NO_TRADE",
             "source": "tindex",
         }
     return rows, "tindex-live"
@@ -171,9 +183,6 @@ def fetch_marketwatch(requested: list[str]) -> tuple[dict[str, dict[str, Any]], 
 
 def market_status() -> str:
     now = datetime.now(ZoneInfo("Asia/Tehran"))
-    # Tehran Exchange regular session is Saturday-Wednesday, 09:00-12:30 Tehran time.
-    # Holiday calendars are handled conservatively by the feed itself; outside the window
-    # the mirror is explicitly analysis-only.
     if now.weekday() in {5, 6, 0, 1, 2} and 9 <= now.hour + now.minute / 60 < 12.5:
         return "OPEN"
     return "CLOSED"
@@ -202,14 +211,13 @@ def main() -> None:
         if price is None:
             errors[symbol] = "price missing"
             continue
-        if previous is None:
-            errors[symbol] = "previous close missing"
+        quote_status = row.get("quote_status") or ("ACTIVE" if volume is not None and volume > 0 else "SUSPENDED_OR_NO_TRADE")
         symbols[symbol] = {
             "instrument": {"lVal18AFC": symbol, "insCode": row.get("insCode") or row.get("ins_code")},
             "instrument_info": {
                 "pClosing": price, "pDrCotVal": last or price, "priceYesterday": previous,
                 "qTotTran5J": volume, "priceMax": high, "priceMin": low,
-                "previousDate": row.get("previous_date"),
+                "previousDate": row.get("previous_date"), "quoteStatus": quote_status,
             },
             "daily": [], "client_type_history": [], "major_shareholders": [],
             "codal_filings": [], "statement_content": [], "share_changes": [],
@@ -218,12 +226,17 @@ def main() -> None:
     output.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     if len(symbols) != len(requested):
         raise SystemExit(f"Iran market mirror incomplete: collected {len(symbols)}/{len(requested)}; missing={','.join(sorted(set(requested)-set(symbols)))}")
-    if any(row["instrument_info"].get("priceYesterday") is None for row in symbols.values()):
-        raise SystemExit("Iran market mirror invalid: one or more symbols have no previous close")
+    # A symbol may legitimately have no previous close when it has just been
+    # suspended, is under a corporate-action halt, or has not traded yet.
+    # The mirror must remain publishable; that individual symbol is fail-closed
+    # by the analysis layer rather than invalidating all other symbols.
+    missing_previous = [symbol for symbol, row in symbols.items() if row["instrument_info"].get("priceYesterday") is None]
+    if missing_previous:
+        print("Symbols without previous close (individual NO_TRADE): " + ",".join(missing_previous))
     print(f"Published {len(symbols)}/{len(requested)} requested Iran market symbols via {source}")
     for symbol, row in symbols.items():
         info = row["instrument_info"]
-        print(f"{symbol}: price={info['pClosing']} last={info['pDrCotVal']} previous={info['priceYesterday']} volume={info['qTotTran5J']}")
+        print(f"{symbol}: price={info['pClosing']} last={info['pDrCotVal']} previous={info['priceYesterday']} volume={info['qTotTran5J']} status={info['quoteStatus']}")
 
 
 if __name__ == "__main__":
