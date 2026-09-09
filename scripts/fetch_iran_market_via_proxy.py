@@ -15,6 +15,7 @@ TARGET = (
     "&showTraded=false&withBestLimits=false&hEven=0&RefID=0"
 )
 PROXIES = [
+    "https://api.codetabs.com/v1/proxy?quest=" + quote(TARGET, safe=""),
     "https://api.allorigins.win/raw?url=" + quote(TARGET, safe=""),
     "https://r.jina.ai/http://cdn.tsetmc.com/api/ClosingPrice/GetMarketWatch"
     "?market=0&paperTypes[0]=1&paperTypes[1]=2&paperTypes[2]=3"
@@ -101,7 +102,7 @@ def main():
     session.headers.update(HEADERS)
     for url in PROXIES:
         try:
-            response = session.get(url, timeout=(10, 45), allow_redirects=True)
+            response = session.get(url, timeout=(8, 45), allow_redirects=True)
             response.raise_for_status()
             symbols = parse(response.text)
             payload = {
