@@ -87,13 +87,14 @@ def pull_and_check(registry_path: str | Path = DEFAULT_REGISTRY):
             closed_dates=config["closed_dates"],
         )
         results = [freshness]
-        # The mirror is now Full-Market. Passing the legacy configured-symbol
-        # list here would only test five names and could report a false green.
-        # Let market_data_health validate the complete published universe.
-        results.append(check_market_mirror_health(
-            config["iran_market_mirror_url"],
-            expected_symbols=None,
-        ))
+        iran_symbols = config["iran_symbols"]
+        if iran_symbols:
+            results.append(
+                check_market_mirror_health(
+                    config["iran_market_mirror_url"],
+                    expected_symbols=iran_symbols,
+                )
+            )
         status = "OK" if all(item.get("status") != "CRITICAL" for item in results) else "CRITICAL"
         return store, results, status
     except Exception:
