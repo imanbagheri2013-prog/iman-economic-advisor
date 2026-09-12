@@ -40,24 +40,50 @@ jobs:
         run: python -m pip install requests
 
       - name: Check Iran TSETMC network reachability
+        continue-on-error: true
         run: |
           python - <<'PY'
+          import os
+          import socket
           import requests
+          from urllib.parse import urlparse
+
           urls = [
               "https://cdn.tsetmc.com/api/ClosingPrice/GetMarketWatch?market=0&withBestLimits=false&hEven=0&RefID=0",
               "https://old.tsetmc.com/tsev2/excel/MarketWatchPlus.aspx?d=0",
           ]
+
+          print("=== RUNNER NETWORK DIAGNOSTICS ===")
+          print("hostname:", socket.gethostname())
+          print("cdn.tsetmc.com DNS:")
+          try:
+              print(socket.gethostbyname_ex("cdn.tsetmc.com"))
+          except Exception as exc:
+              print(type(exc).__name__, exc)
+
+          print("HTTP(S) proxy environment:")
+          for key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"):
+              print(key, os.environ.get(key, "<unset>"))
+
           ok = False
           for url in urls:
+              print("\nTEST:", url)
               try:
-                  r = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
-                  print(url, r.status_code, len(r.content))
+                  r = requests.get(
+                      url,
+                      timeout=15,
+                      headers={"User-Agent": "Mozilla/5.0"},
+                  )
+                  print("status:", r.status_code)
+                  print("bytes:", len(r.content))
+                  print("final_url:", r.url)
+                  print("content_type:", r.headers.get("content-type"))
                   if r.ok and len(r.content) > 1000:
                       ok = True
               except Exception as exc:
-                  print(url, type(exc).__name__, exc)
-          if not ok:
-              raise SystemExit("TSETMC is not reachable from the configured Iran runner")
+                  print("ERROR:", type(exc).__name__, repr(exc))
+
+          print("\nTSETMC_DIRECT_REACHABLE=", ok)
           PY
 
       - name: Restore last valid market mirror
