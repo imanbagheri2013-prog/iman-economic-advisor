@@ -58,6 +58,20 @@ jobs:
               except Exception as exc:
                   print(f"- {host}: ERROR {type(exc).__name__}: {exc}")
 
+          print("\n## TCP 443 connectivity")
+          for host in ("cdn.tsetmc.com", "old.tsetmc.com", "www.google.com"):
+              try:
+                  addresses = sorted({item[4][0] for item in socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)})
+                  print(f"- {host}: resolved={addresses}")
+                  for ip in addresses:
+                      try:
+                          with socket.create_connection((ip, 443), timeout=8):
+                              print(f"  TCP {ip}:443 = CONNECTED")
+                      except Exception as exc:
+                          print(f"  TCP {ip}:443 = ERROR {type(exc).__name__}: {exc}")
+              except Exception as exc:
+                  print(f"- {host}: TCP/DNS ERROR {type(exc).__name__}: {exc}")
+
           print("\n## Public egress IP")
           for url in ("https://api.ipify.org", "https://ifconfig.me/ip"):
               try:
