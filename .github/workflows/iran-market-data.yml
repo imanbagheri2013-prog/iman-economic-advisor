@@ -20,8 +20,6 @@ concurrency:
 
 jobs:
   publish:
-    # TSETMC is geo-restricted. This job MUST run on the Iran-hosted IEA
-    # runner, not on GitHub-hosted infrastructure outside Iran.
     runs-on: [self-hosted, linux, x64]
     timeout-minutes: 15
     steps:
@@ -39,51 +37,70 @@ jobs:
       - name: Install requests
         run: python -m pip install requests
 
-      - name: Check Iran TSETMC network reachability
+      - name: Diagnose runner network and TSETMC access
         continue-on-error: true
         run: |
-          python - <<'PY'
+          python - <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
           import os
           import socket
           import requests
-          from urllib.parse import urlparse
 
+          print("# IEA TSETMC Network Diagnostic")
+          print(f"Runner hostname: {socket.gethostname()}")
+          print("\n## Proxy environment")
+          for key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"):
+              print(f"- {key}: {os.environ.get(key, '<unset>')}")
+
+          print("\n## DNS")
+          for host in ("cdn.tsetmc.com", "old.tsetmc.com", "www.google.com"):
+              try:
+                  print(f"- {host}: {socket.gethostbyname_ex(host)}")
+              except Exception as exc:
+                  print(f"- {host}: ERROR {type(exc).__name__}: {exc}")
+
+          print("\n## Public egress IP")
+          for url in ("https://api.ipify.org", "https://ifconfig.me/ip"):
+              try:
+                  r = requests.get(url, timeout=10)
+                  print(f"- {url}: HTTP {r.status_code}, IP={r.text.strip()[:100]}")
+              except Exception as exc:
+                  print(f"- {url}: ERROR {type(exc).__name__}: {exc}")
+
+          tests = [
+              ("General HTTPS", "https://www.google.com"),
+              ("TSETMC CDN", "https://cdn.tsetmc.com/api/ClosingPrice/GetMarketWatch?market=0&withBestLimits=false&hEven=0&RefID=0"),
+              ("TSETMC old", "https://old.tsetmc.com/tsev2/excel/MarketWatchPlus.aspx?d=0"),
+          ]
+          print("\n## HTTPS connectivity")
+          for name, url in tests:
+              try:
+                  r = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
+                  print(f"- {name}: HTTP {r.status_code}, bytes={len(r.content)}, final={r.url}")
+              except Exception as exc:
+                  print(f"- {name}: ERROR {type(exc).__name__}: {exc}")
+
+          print("\nDiagnostic complete. This step is informational and does not publish data.")
+          PY
+
+      - name: Check Iran TSETMC network reachability
+        run: |
+          python - <<'PY'
+          import requests
           urls = [
               "https://cdn.tsetmc.com/api/ClosingPrice/GetMarketWatch?market=0&withBestLimits=false&hEven=0&RefID=0",
               "https://old.tsetmc.com/tsev2/excel/MarketWatchPlus.aspx?d=0",
           ]
-
-          print("=== RUNNER NETWORK DIAGNOSTICS ===")
-          print("hostname:", socket.gethostname())
-          print("cdn.tsetmc.com DNS:")
-          try:
-              print(socket.gethostbyname_ex("cdn.tsetmc.com"))
-          except Exception as exc:
-              print(type(exc).__name__, exc)
-
-          print("HTTP(S) proxy environment:")
-          for key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"):
-              print(key, os.environ.get(key, "<unset>"))
-
           ok = False
           for url in urls:
-              print("\nTEST:", url)
               try:
-                  r = requests.get(
-                      url,
-                      timeout=15,
-                      headers={"User-Agent": "Mozilla/5.0"},
-                  )
-                  print("status:", r.status_code)
-                  print("bytes:", len(r.content))
-                  print("final_url:", r.url)
-                  print("content_type:", r.headers.get("content-type"))
+                  r = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
+                  print(url, r.status_code, len(r.content))
                   if r.ok and len(r.content) > 1000:
                       ok = True
               except Exception as exc:
-                  print("ERROR:", type(exc).__name__, repr(exc))
-
-          print("\nTSETMC_DIRECT_REACHABLE=", ok)
+                  print(url, type(exc).__name__, exc)
+          if not ok:
+              raise SystemExit("TSETMC is not reachable from the configured runner")
           PY
 
       - name: Restore last valid market mirror
@@ -192,10 +209,8 @@ jobs:
           set -e
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
           mkdir -p "$RUNNER_TEMP/iran-market-mirror"
           cp data/iran_market_live.json "$RUNNER_TEMP/iran-market-mirror/iran_market_live.json"
-
           git reset --hard HEAD
           git clean -fd data
           git checkout -B market-data origin/market-data
