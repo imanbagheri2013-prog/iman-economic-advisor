@@ -16,7 +16,7 @@ permissions:
 
 concurrency:
   group: iran-market-data
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   publish:
