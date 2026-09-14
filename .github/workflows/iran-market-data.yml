@@ -14,13 +14,8 @@ on:
 permissions:
   contents: write
 
-concurrency:
-  group: iran-market-data
-  cancel-in-progress: false
-
 jobs:
   publish:
-    # Use the available self-hosted runner without requiring label matching.
     runs-on: self-hosted
     timeout-minutes: 15
     steps:
