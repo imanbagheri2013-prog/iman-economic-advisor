@@ -54,20 +54,6 @@ jobs:
               except Exception as exc:
                   print(f"- {host}: ERROR {type(exc).__name__}: {exc}")
 
-          print("\n## TCP 80/443 connectivity")
-          for host in ("cdn.tsetmc.com", "old.tsetmc.com", "www.google.com"):
-              for port in (80, 443):
-                  try:
-                      addresses = sorted({item[4][0] for item in socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)})
-                      for ip in addresses:
-                          try:
-                              with socket.create_connection((ip, port), timeout=8):
-                                  print(f"  TCP {ip}:{port} = CONNECTED")
-                          except Exception as exc:
-                              print(f"  TCP {ip}:{port} = ERROR {type(exc).__name__}: {exc}")
-                  except Exception as exc:
-                      print(f"- {host}:{port}: TCP/DNS ERROR {type(exc).__name__}: {exc}")
-
           print("\n## Public egress IP")
           for url in ("https://api.ipify.org", "https://ifconfig.me/ip"):
               try:
@@ -76,44 +62,18 @@ jobs:
               except Exception as exc:
                   print(f"- {url}: ERROR {type(exc).__name__}: {exc}")
 
-          tests = [
-              ("General HTTPS", "https://www.google.com"),
+          print("\n## TSETMC direct connectivity")
+          for name, url in [
               ("TSETMC CDN HTTPS", "https://cdn.tsetmc.com/api/ClosingPrice/GetMarketWatch?market=0&withBestLimits=false&hEven=0&RefID=0"),
               ("TSETMC old HTTPS", "https://old.tsetmc.com/tsev2/excel/MarketWatchPlus.aspx?d=0"),
-              ("TSETMC old HTTP", "http://old.tsetmc.com/tsev2/excel/MarketWatchPlus.aspx?d=0"),
-          ]
-          print("\n## TSETMC connectivity")
-          for name, url in tests:
+          ]:
               try:
                   r = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0"}, allow_redirects=True)
                   print(f"- {name}: HTTP {r.status_code}, bytes={len(r.content)}, final={r.url}")
               except Exception as exc:
                   print(f"- {name}: ERROR {type(exc).__name__}: {exc}")
 
-          print("\nDiagnostic complete. This step is informational and does not publish data.")
-          PY
-
-      - name: Check Iran TSETMC network reachability
-        run: |
-          python - <<'PY'
-          import requests
-          urls = [
-              "https://cdn.tsetmc.com/api/ClosingPrice/GetMarketWatch?market=0&withBestLimits=false&hEven=0&RefID=0",
-              "https://old.tsetmc.com/tsev2/excel/MarketWatchPlus.aspx?d=0",
-              "http://old.tsetmc.com/tsev2/excel/MarketWatchPlus.aspx?d=0",
-              "http://old.tsetmc.com/tsev2/data/MarketWatchPlus.aspx",
-          ]
-          ok = False
-          for url in urls:
-              try:
-                  r = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0"}, allow_redirects=True)
-                  print(url, r.status_code, len(r.content), r.url)
-                  if r.ok and len(r.content) > 1000:
-                      ok = True
-              except Exception as exc:
-                  print(url, type(exc).__name__, exc)
-          if not ok:
-              raise SystemExit("No usable TSETMC endpoint is reachable from the configured runner")
+          print("\nDiagnostic complete. Direct TSETMC failure does not block proxy fallback.")
           PY
 
       - name: Restore last valid market mirror
