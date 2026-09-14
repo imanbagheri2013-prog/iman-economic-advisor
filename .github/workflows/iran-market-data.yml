@@ -20,9 +20,8 @@ concurrency:
 
 jobs:
   publish:
-    # Use the currently available dedicated self-hosted runner.
-    # TSETMC connectivity is verified by the network-check step below.
-    runs-on: [self-hosted, linux, x64]
+    # Use the available self-hosted runner without requiring label matching.
+    runs-on: self-hosted
     timeout-minutes: 15
     steps:
       - name: Checkout main
