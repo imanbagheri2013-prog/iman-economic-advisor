@@ -79,6 +79,7 @@ jobs:
       - name: Restore last valid market mirror
         run: |
           set -e
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git fetch origin market-data
           mkdir -p data
           if git cat-file -e origin/market-data:data/iran_market_live.json 2>/dev/null; then
