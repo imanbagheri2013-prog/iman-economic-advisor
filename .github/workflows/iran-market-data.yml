@@ -16,7 +16,9 @@ permissions:
 
 jobs:
   publish:
-    runs-on: self-hosted
+    # TSETMC is unreachable from the VPS network. Use GitHub-hosted egress
+    # for market-data acquisition; the VPS remains available for the IEA API/scheduler.
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - name: Checkout main
