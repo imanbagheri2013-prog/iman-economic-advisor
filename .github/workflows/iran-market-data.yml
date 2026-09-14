@@ -20,10 +20,9 @@ concurrency:
 
 jobs:
   publish:
-    # This workflow must run on a runner with direct TSETMC network access.
-    # The current generic runner cannot reach TSETMC, so it stays available
-    # for other workloads while the Iran mirror uses a dedicated label.
-    runs-on: [self-hosted, linux, x64, iran-tsetmc]
+    # Use the currently available dedicated self-hosted runner.
+    # TSETMC connectivity is verified by the network-check step below.
+    runs-on: [self-hosted, linux, x64]
     timeout-minutes: 15
     steps:
       - name: Checkout main
