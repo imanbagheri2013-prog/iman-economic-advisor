@@ -13,10 +13,6 @@ on:
 permissions:
   contents: write
 
-env:
-  HTTP_PROXY: ${{ secrets.IRAN_TSETMC_PROXY }}
-  HTTPS_PROXY: ${{ secrets.IRAN_TSETMC_PROXY }}
-
 jobs:
   publish:
     runs-on: self-hosted
@@ -37,6 +33,9 @@ jobs:
         run: python -m pip install requests
 
       - name: Require Iranian egress proxy
+        env:
+          HTTPS_PROXY: ${{ secrets.IRAN_TSETMC_PROXY }}
+          HTTP_PROXY: ${{ secrets.IRAN_TSETMC_PROXY }}
         run: |
           set -e
           if [ -z "${HTTPS_PROXY:-}" ]; then
@@ -47,6 +46,9 @@ jobs:
 
       - name: Diagnose TSETMC access through proxy
         continue-on-error: true
+        env:
+          HTTPS_PROXY: ${{ secrets.IRAN_TSETMC_PROXY }}
+          HTTP_PROXY: ${{ secrets.IRAN_TSETMC_PROXY }}
         run: |
           python - <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
           import os, socket, requests
@@ -61,14 +63,14 @@ jobs:
               print(f"Egress-IP check failed: {type(exc).__name__}: {exc}")
           try:
               r = requests.get(
-                  "https://old.tsetmc.com/tsev2/excel/MarketWatchPlus.aspx?d=0",
+                  "https://webgw.tse.ir/InstrumentProvider/api/v1/MarketWatch/MarketWatchCash/fa",
                   timeout=(8, 20),
                   headers={"User-Agent": "Mozilla/5.0"},
                   allow_redirects=True,
               )
-              print(f"TSETMC HTTP {r.status_code}, bytes={len(r.content)}, final={r.url}")
+              print(f"TSE web gateway HTTP {r.status_code}, bytes={len(r.content)}, final={r.url}")
           except Exception as exc:
-              print(f"TSETMC access failed: {type(exc).__name__}: {exc}")
+              print(f"TSE web gateway access failed: {type(exc).__name__}: {exc}")
           PY
 
       - name: Restore last valid market mirror
@@ -85,6 +87,9 @@ jobs:
           fi
 
       - name: Fetch Full-Market from TSETMC
+        env:
+          HTTPS_PROXY: ${{ secrets.IRAN_TSETMC_PROXY }}
+          HTTP_PROXY: ${{ secrets.IRAN_TSETMC_PROXY }}
         run: |
           set -e
           python scripts/publish_iran_market_full_xlsx.py
