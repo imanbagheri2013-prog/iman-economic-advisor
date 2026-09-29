@@ -8,15 +8,24 @@ on:
     paths:
       - "scripts/publish_iran_market_data.py"
       - "scripts/publish_iran_market_full_xlsx.py"
+      - "scripts/fetch_iran_market_via_proxy.py"
       - ".github/workflows/iran-market-data.yml"
 
 permissions:
   contents: write
 
+concurrency:
+  group: iran-market-data
+  cancel-in-progress: true
+
 jobs:
   publish:
-    runs-on: self-hosted
-    timeout-minutes: 10
+    # GitHub-hosted runner avoids dependency on the custom self-hosted runner.
+    # Primary access still uses the configured Iranian egress proxy, with a
+    # resilient public-proxy fallback if primary TSETMC access fails.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
     steps:
       - name: Checkout main
         uses: actions/checkout@v5
@@ -86,13 +95,47 @@ jobs:
             echo "No previous market mirror exists yet; first successful fetch will create it."
           fi
 
-      - name: Fetch Full-Market from TSETMC
+      - name: Fetch Full-Market from TSETMC through Iranian proxy
+        id: primary_fetch
+        continue-on-error: true
         env:
           HTTPS_PROXY: ${{ secrets.IRAN_TSETMC_PROXY }}
           HTTP_PROXY: ${{ secrets.IRAN_TSETMC_PROXY }}
         run: |
-          set -e
-          python scripts/publish_iran_market_full_xlsx.py
+          set +e
+          for attempt in 1 2 3; do
+            echo "Primary Full-Market fetch attempt ${attempt}/3"
+            python scripts/publish_iran_market_full_xlsx.py
+            rc=$?
+            if [ "$rc" -eq 0 ]; then
+              echo "primary_ok=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "Primary attempt ${attempt} failed with exit code ${rc}."
+            [ "$attempt" -lt 3 ] && sleep $((attempt * 10))
+          done
+          echo "primary_ok=false" >> "$GITHUB_OUTPUT"
+          exit 1
+
+      - name: Fetch Full-Market through resilient public proxy fallback
+        id: proxy_fetch
+        if: steps.primary_fetch.outputs.primary_ok != 'true'
+        continue-on-error: true
+        run: |
+          set +e
+          for attempt in 1 2 3; do
+            echo "Proxy Full-Market fetch attempt ${attempt}/3"
+            python scripts/fetch_iran_market_via_proxy.py
+            rc=$?
+            if [ "$rc" -eq 0 ]; then
+              echo "proxy_ok=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "Proxy attempt ${attempt} failed with exit code ${rc}."
+            [ "$attempt" -lt 3 ] && sleep $((attempt * 10))
+          done
+          echo "proxy_ok=false" >> "$GITHUB_OUTPUT"
+          exit 1
 
       - name: Verify Full-Market mirror payload
         id: verify
@@ -121,6 +164,7 @@ jobs:
               raise SystemExit(f"universe_count mismatch: metadata={count}, symbols={len(symbols)}")
           if not generated:
               raise SystemExit("generated_at is missing")
+
           ts = datetime.fromisoformat(generated.replace("Z", "+00:00"))
           age = (datetime.now(timezone.utc) - ts).total_seconds()
           if age < 0 or age > 1200:
@@ -129,11 +173,19 @@ jobs:
           complete = 0
           for item in symbols.values():
               info = item.get("instrument_info") or {}
-              if info.get("pClosing") is not None and info.get("pDrCotVal") is not None and info.get("priceYesterday") is not None:
+              if (
+                  info.get("pClosing") is not None
+                  and info.get("pDrCotVal") is not None
+                  and info.get("priceYesterday") is not None
+              ):
                   complete += 1
+
           ratio = complete / count
           if complete < 1000 or ratio < 0.90:
-              raise SystemExit(f"too many incomplete price records: complete={complete}, total={count}, ratio={ratio:.1%}")
+              raise SystemExit(
+                  f"too many incomplete price records: "
+                  f"complete={complete}, total={count}, ratio={ratio:.1%}"
+              )
 
           print(f"Full-Market mirror valid: {count} symbols")
           print(f"Complete price records: {complete} ({ratio:.1%})")
@@ -144,12 +196,16 @@ jobs:
 
       - name: Publish mirror branch
         if: steps.verify.outputs.verified == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -e
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
           mkdir -p "$RUNNER_TEMP/iran-market-mirror"
           cp data/iran_market_live.json "$RUNNER_TEMP/iran-market-mirror/iran_market_live.json"
+
           git reset --hard HEAD
           git clean -fd data
           git checkout -B market-data origin/market-data
@@ -159,7 +215,7 @@ jobs:
           git commit -m "Update full Iran market data mirror" || echo "No data changes"
           git push origin HEAD:market-data --force
 
-      - name: Fail when verification did not pass
+      - name: Fail when no valid Full-Market snapshot was produced
         if: steps.verify.outputs.verified != 'true'
         run: |
           echo "::error::No valid Full-Market snapshot was produced. Existing market-data mirror was not modified."
