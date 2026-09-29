@@ -37,6 +37,19 @@ class IranMarketMirrorProvider:
         payload = self._payload()
         row = payload["symbols"].get(symbol)
         if not isinstance(row, dict):
+            # The mirror is keyed primarily by ISIN/instrumentId, while IEA
+            # requests configured market symbols such as فولاد/فملی. Resolve
+            # those human-readable symbols against the instrument payload.
+            target = str(symbol).strip()
+            for candidate in payload["symbols"].values():
+                if not isinstance(candidate, dict):
+                    continue
+                instrument_candidate = candidate.get("instrument") or {}
+                name = str(instrument_candidate.get("lVal18AFC") or "").strip()
+                if name == target:
+                    row = candidate
+                    break
+        if not isinstance(row, dict):
             raise ValueError(f"Iran market mirror has no data for {symbol}")
         instrument = row.get("instrument") or {}
         info = row.get("instrument_info") or {}
