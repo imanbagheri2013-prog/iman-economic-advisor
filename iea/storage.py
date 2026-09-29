@@ -65,11 +65,58 @@ class Store:
         self.con = sqlite3.connect(self.path)
         self.con.executescript(SCHEMA)
         self.con.commit()
+        self._repair_redundant_observations()
+
+    def _repair_redundant_observations(self):
+        """Remove legacy duplicate observations created when UNIQUE columns contained NULLs."""
+        self.con.execute("""
+            CREATE TABLE IF NOT EXISTS maintenance(
+                key TEXT PRIMARY KEY,
+                completed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        done = self.con.execute(
+            "SELECT 1 FROM maintenance WHERE key = 'null_realtime_dedupe_v1' LIMIT 1"
+        ).fetchone()
+        if done:
+            return
+        series = self.con.execute("""
+            SELECT DISTINCT provider, series_id
+            FROM observations
+            WHERE realtime_start IS NULL AND realtime_end IS NULL
+        """).fetchall()
+        for provider, series_id in series:
+            self.con.execute("""
+                DELETE FROM observations
+                WHERE provider = ? AND series_id = ?
+                  AND realtime_start IS NULL AND realtime_end IS NULL
+                  AND rowid NOT IN (
+                      SELECT MAX(rowid)
+                      FROM observations
+                      WHERE provider = ? AND series_id = ?
+                        AND realtime_start IS NULL AND realtime_end IS NULL
+                      GROUP BY date
+                  )
+            """, (provider, series_id, provider, series_id))
+            self.con.commit()
+        self.con.execute(
+            "INSERT INTO maintenance(key) VALUES ('null_realtime_dedupe_v1')"
+        )
+        self.con.commit()
 
     def upsert(self, obs: Observation):
+        if obs.realtime_start is None and obs.realtime_end is None:
+            self.con.execute(
+                """
+                DELETE FROM observations
+                WHERE provider = ? AND series_id = ? AND date = ?
+                  AND realtime_start IS NULL AND realtime_end IS NULL
+                """,
+                (obs.provider, obs.series_id, obs.date.isoformat()),
+            )
         self.con.execute(
             """
-            INSERT OR REPLACE INTO observations
+            INSERT INTO observations
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
