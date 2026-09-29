@@ -170,25 +170,38 @@ jobs:
           if age < 0 or age > 1200:
               raise SystemExit(f"snapshot is stale: age_seconds={age:.1f}")
 
-          complete = 0
+          # Cash and ETF are expected to carry complete daily price fields.
+          # Futures/options/debt instruments can legitimately omit one or more
+          # spot-price fields, so they are validated separately.
+          by_segment = {}
           for item in symbols.values():
-              info = item.get("instrument_info") or {}
-              if (
-                  info.get("pClosing") is not None
-                  and info.get("pDrCotVal") is not None
-                  and info.get("priceYesterday") is not None
-              ):
-                  complete += 1
+              segment = (item.get("market") or {}).get("segment") or "unknown"
+              by_segment.setdefault(segment, []).append(item)
 
-          ratio = complete / count
-          if complete < 1000 or ratio < 0.90:
-              raise SystemExit(
-                  f"too many incomplete price records: "
-                  f"complete={complete}, total={count}, ratio={ratio:.1%}"
-              )
+          for segment in ("cash", "etf"):
+              rows = by_segment.get(segment, [])
+              if not rows:
+                  raise SystemExit(f"required market segment is missing: {segment}")
+              complete = 0
+              for item in rows:
+                  info = item.get("instrument_info") or {}
+                  if (
+                      info.get("pClosing") is not None
+                      and info.get("pDrCotVal") is not None
+                      and info.get("priceYesterday") is not None
+                  ):
+                      complete += 1
+              ratio = complete / len(rows)
+              if ratio < 0.95:
+                  raise SystemExit(
+                      f"{segment} price completeness too low: "
+                      f"complete={complete}, total={len(rows)}, ratio={ratio:.1%}"
+                  )
+              print(f"{segment} price records: {complete}/{len(rows)} ({ratio:.1%})")
 
+          segment_counts = {k: len(v) for k, v in by_segment.items()}
+          print(f"Segment counts: {segment_counts}")
           print(f"Full-Market mirror valid: {count} symbols")
-          print(f"Complete price records: {complete} ({ratio:.1%})")
           print(f"Freshness: {age:.1f}s")
           print(f"Source: {data.get('source')}")
           PY
