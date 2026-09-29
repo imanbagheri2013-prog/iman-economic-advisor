@@ -42,7 +42,7 @@ def number(v):
         return None
 
 
-def build_item(row):
+def build_item(row, segment=None):
     symbol = str(first(row, "instrumentName", "instrument_Name", "lVal18AFC", "lVal18AfC", "symbol", "name") or "").strip()
     isin = str(first(row, "instrumentId", "instrumentid", "isin", "ISIN", "insCode", "inscode") or "").strip()
     key = isin or symbol
@@ -52,7 +52,7 @@ def build_item(row):
     last = number(first(row, "lastPrice", "pDrCotVal", "last", "tradePrice"))
     previous = number(first(row, "yesterdayPrice", "priceYesterday", "py", "previousPrice"))
     volume = number(first(row, "tradeVolume", "qTotTran5J", "volume", "totalVolume"))
-    return {"instrument":{"lVal18AFC":symbol or key,"insCode":first(row,"insCode","inscode"),"isin":isin or None},"instrument_info":{"pClosing":closing,"pDrCotVal":last,"priceYesterday":previous,"priceMax":number(first(row,"maxValue","priceMax","pMax")),"priceMin":number(first(row,"minValue","priceMin","pMin")),"qTotTran5J":volume,"hEven":first(row,"hEven","heven") or "","quoteStatus":"ACTIVE" if volume not in (None,0) else "SUSPENDED_OR_NO_TRADE"},"market":{"marketId":first(row,"marketid","marketId"),"marketName":first(row,"marketname","marketName"),"marketType":first(row,"markettypeid","marketTypeId","markettypename","marketTypeName"),"industry":first(row,"industryid","industryId","industryname","industryName"),"state":first(row,"stateid","stateId","statename","stateName")},"daily":[],"client_type_history":[],"major_shareholders":[],"codal_filings":[],"statement_content":[],"share_changes":[]}
+    return {"instrument":{"lVal18AFC":symbol or key,"insCode":first(row,"insCode","inscode"),"isin":isin or None},"instrument_info":{"pClosing":closing,"pDrCotVal":last,"priceYesterday":previous,"priceMax":number(first(row,"maxValue","priceMax","pMax")),"priceMin":number(first(row,"minValue","priceMin","pMin")),"qTotTran5J":volume,"hEven":first(row,"hEven","heven") or "","quoteStatus":"ACTIVE" if volume not in (None,0) else "SUSPENDED_OR_NO_TRADE"},"market":{"segment":segment,"marketId":first(row,"marketid","marketId"),"marketName":first(row,"marketname","marketName"),"marketType":first(row,"markettypeid","marketTypeId","markettypename","marketTypeName"),"industry":first(row,"industryid","industryId","industryname","industryName"),"state":first(row,"stateid","stateId","statename","stateName")},"daily":[],"client_type_history":[],"major_shareholders":[],"codal_filings":[],"statement_content":[],"share_changes":[]}
 
 
 def fetch_webgw(session):
@@ -67,7 +67,7 @@ def fetch_webgw(session):
                 raise RuntimeError("Items is not a list")
             valid = 0
             for row in rows:
-                item = build_item(row)
+                item = build_item(row, kind)
                 if item:
                     key = item["instrument"].get("isin") or item["instrument"]["lVal18AFC"]
                     symbols[key] = item
