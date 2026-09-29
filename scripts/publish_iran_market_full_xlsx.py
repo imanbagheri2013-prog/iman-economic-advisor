@@ -101,7 +101,10 @@ def fetch_cdn(session):
 
 def main():
     session = requests.Session()
-    session.trust_env = True
+    # TSE webgw is directly reachable from the Iran runner. Ignore any
+    # runner-level HTTP(S)_PROXY so a stale local proxy cannot break the
+    # primary market-data path.
+    session.trust_env = False
     session.headers.update(HEADERS)
     try:
         symbols, source, errors = fetch_webgw(session)
