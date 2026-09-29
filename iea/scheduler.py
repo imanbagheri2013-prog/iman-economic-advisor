@@ -111,59 +111,38 @@ def _iran_market_provider():
 
 
 def _live_market_intelligence(market_status: str, mirror_health: dict | None = None) -> dict:
-    """Fetch Iran symbols from the Railway-safe mirror; never analyze unhealthy mirror data."""
-    iran_symbols = configured_iran_symbols()
-    provider_name = "tsetmc-github-actions"
-    if iran_symbols:
-        symbols = iran_symbols
-        provider = _iran_market_provider()
-        if mirror_health and mirror_health.get("status") == "CRITICAL":
-            return {
-                "engine": "IEA Market Intelligence", "version": "1.1", "status": "NO_DATA",
-                "market_status": market_status, "requested_symbols": symbols, "provider": provider_name,
-                "actionable_count": 0, "signals": [],
-                "safety": {"stale_data_action": "NO_TRADE", "closed_market_action": "NO_TRADE", "missing_required_data_action": "NO_TRADE"},
-                "health_gate": "BLOCKED",
-            }
-    else:
-        symbols = configured_symbols()
-        provider = YahooChartProvider()
-        provider_name = "yahoo_chart"
-
-    if not symbols:
-        return {
-            "engine": "IEA Market Intelligence", "version": "1.1", "status": "NOT_CONFIGURED",
-            "market_status": market_status, "actionable_count": 0, "signals": [],
-            "safety": {"stale_data_action": "NO_TRADE", "closed_market_action": "NO_TRADE", "missing_required_data_action": "NO_TRADE"},
-        }
-
-    snapshots, errors = [], []
-    for symbol in symbols:
-        try:
-            snapshots.append(provider.snapshot(symbol))
-        except Exception as exc:
-            errors.append({"symbol": symbol, "error_type": type(exc).__name__, "error": str(exc)})
-
+    """Scan the entire Iran market mirror, then shortlist after full-universe ranking."""
+    provider_name = "tsetmc-github-actions"; provider = _iran_market_provider()
+    if mirror_health and mirror_health.get("status") == "CRITICAL":
+        return {"engine": "IEA Market Intelligence", "version": "1.2", "status": "NO_DATA",
+            "market_status": market_status, "provider": provider_name, "universe_mode": "FULL_MARKET",
+            "universe_scan": "BLOCKED_BY_HEALTH_GATE", "actionable_count": 0, "signals": [],
+            "actionable_shortlist": [], "actionable_shortlist_symbols": [], "shortlist_limit": MAX_ACTIONABLE_SIGNALS,
+            "health_gate": "BLOCKED"}
+    try:
+        snapshots, universe = provider.market_universe()
+    except Exception as exc:
+        return {"engine": "IEA Market Intelligence", "version": "1.2", "status": "NO_DATA",
+            "market_status": market_status, "provider": provider_name, "universe_mode": "FULL_MARKET",
+            "actionable_count": 0, "signals": [], "errors": [{"error_type": type(exc).__name__, "error": str(exc)}],
+            "health_gate": "OPEN" if not mirror_health or mirror_health.get("status") in {"HEALTHY", "WARNING"} else "BLOCKED"}
     report = analyze_snapshots(snapshots)
-    report["status"] = "OK" if snapshots else "NO_DATA"
-    report["market_status"] = market_status
-    report["requested_symbols"] = symbols
-    report["provider"] = provider_name
-    report["analysis_only_when_closed"] = True
+    report.update({"status": "OK" if snapshots else "NO_DATA", "market_status": market_status,
+        "provider": provider_name, "universe_mode": "FULL_MARKET",
+        "universe_scan": "ALL_ELIGIBLE_MIRROR_INSTRUMENTS", "universe": universe,
+        "analysis_only_when_closed": True})
     if mirror_health is not None:
         report["health_gate"] = "OPEN" if mirror_health.get("status") in {"HEALTHY", "WARNING"} else "BLOCKED"
-
-    ranked = report.get("signals", [])
-    actionable = [signal for signal in ranked if signal.get("action") in {"BUY", "SELL"}]
+    ranked = report.get("signals", []); actionable = [x for x in ranked if x.get("action") in {"BUY", "SELL"}]
     shortlist = actionable[:MAX_ACTIONABLE_SIGNALS]
+    report["signals_total"] = len(ranked); report["actionable_count"] = len(actionable)
+    report["signals"] = ranked[:MAX_ACTIONABLE_SIGNALS]
+    report["signals_returned"] = len(report["signals"]); report["signals_truncated"] = len(ranked) > len(report["signals"])
     report["actionable_shortlist"] = shortlist
-    report["actionable_shortlist_symbols"] = [signal.get("symbol") for signal in shortlist]
+    report["actionable_shortlist_symbols"] = [x.get("symbol") for x in shortlist]
     report["shortlist_limit"] = MAX_ACTIONABLE_SIGNALS
-    report["shortlist_policy"] = "TOP_RANKED_ACTIONABLE_ADVISORY_ONLY"
+    report["shortlist_policy"] = "TOP_RANKED_ACTIONABLE_AFTER_FULL_MARKET_SCAN"
     report["top_signal"] = shortlist[0] if shortlist else None
-
-    if errors:
-        report["errors"] = errors
     return report
 
 
