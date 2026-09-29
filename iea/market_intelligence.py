@@ -215,15 +215,18 @@ def analyze_snapshots(snapshots: Iterable[MarketSnapshot]) -> dict[str, Any]:
     signals = [analyze_snapshot(snapshot) for snapshot in snapshots]
     ranked = rank_signals(signals)
     actionable = [signal for signal in ranked if signal.action in {"BUY", "SELL"}]
+    # Full-market scan remains in memory; persisted reports stay compact.
+    preview = ranked[:10]
     return {
         "engine": "IEA Market Intelligence",
-        "version": "1.1",
+        "version": "1.2",
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "count": len(signals),
         "actionable_count": len(actionable),
-        "signals": [signal.as_dict() for signal in ranked],
-        "ranked_symbols": [signal.symbol for signal in ranked],
-        "actionable_ranked_symbols": [signal.symbol for signal in actionable],
+        "signals": [signal.as_dict() for signal in preview],
+        "signals_preview_count": len(preview),
+        "ranked_symbols": [signal.symbol for signal in preview],
+        "actionable_ranked_symbols": [signal.symbol for signal in actionable[:10]],
         "safety": {
             "stale_data_action": "NO_TRADE",
             "closed_market_action": "NO_TRADE",
