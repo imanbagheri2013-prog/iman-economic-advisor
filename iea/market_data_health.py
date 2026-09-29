@@ -116,6 +116,19 @@ def check_market_mirror_health(
         for symbol in target_symbols:
             row = symbols.get(symbol)
             if not isinstance(row, dict):
+                # The mirror is keyed by ISIN/instrumentId; configured symbols
+                # are human-readable names such as فولاد/فملی. Resolve them
+                # against instrument.lVal18AFC, matching the provider lookup.
+                target = str(symbol).strip()
+                for candidate in symbols.values():
+                    if not isinstance(candidate, dict):
+                        continue
+                    instrument_candidate = candidate.get("instrument") or {}
+                    name = str(instrument_candidate.get("lVal18AFC") or "").strip()
+                    if name == target:
+                        row = candidate
+                        break
+            if not isinstance(row, dict):
                 result["invalid_symbols"].append(symbol)
                 result["missing_required_data"].append({"symbol": symbol, "fields": ["symbol"]})
                 continue
