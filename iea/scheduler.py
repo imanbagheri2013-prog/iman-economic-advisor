@@ -136,7 +136,7 @@ def _live_market_intelligence(market_status: str, mirror_health: dict | None = N
     ranked = report.get("signals", []); actionable = [x for x in ranked if x.get("action") in {"BUY", "SELL"}]
     shortlist = actionable[:MAX_ACTIONABLE_SIGNALS]
     report["signals_total"] = len(ranked); report["actionable_count"] = len(actionable)
-    report["signals"] = ranked[:MAX_ACTIONABLE_SIGNALS]
+    report["signals"] = shortlist
     report["signals_returned"] = len(report["signals"]); report["signals_truncated"] = len(ranked) > len(report["signals"])
     report["actionable_shortlist"] = shortlist
     report["actionable_shortlist_symbols"] = [x.get("symbol") for x in shortlist]
