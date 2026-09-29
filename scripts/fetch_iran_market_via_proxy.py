@@ -99,6 +99,8 @@ def parse(content: str):
 def main():
     errors = []
     session = requests.Session()
+    # Public proxy fallback must bypass runner-level HTTP(S)_PROXY settings.
+    session.trust_env = False
     session.headers.update(HEADERS)
     for url in PROXIES:
         try:
