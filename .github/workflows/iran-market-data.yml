@@ -23,7 +23,7 @@ jobs:
     # GitHub-hosted runner avoids dependency on the custom self-hosted runner.
     # Primary access still uses the configured Iranian egress proxy, with a
     # resilient public-proxy fallback if primary TSETMC access fails.
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, iran-tsetmc]
     timeout-minutes: 15
 
     steps:
