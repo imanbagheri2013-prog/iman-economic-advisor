@@ -33,6 +33,58 @@ class IranMarketMirrorProvider:
         self._cached_payload = payload
         return payload
 
+    def market_universe(self) -> tuple[list[MarketSnapshot], dict[str, Any]]:
+        """Return the full mirror universe plus compact market-wide metrics."""
+        payload = self._payload()
+        market_status = str(payload.get("market_status") or "CLOSED").upper()
+        generated_at = payload.get("generated_at")
+        snapshots: list[MarketSnapshot] = []
+        invalid = suspended = up = down = unchanged = 0
+        segments: dict[str, int] = {}
+        total_volume = total_value = 0.0
+        for row in payload["symbols"].values():
+            if not isinstance(row, dict):
+                invalid += 1; continue
+            instrument = row.get("instrument") or {}; info = row.get("instrument_info") or {}
+            daily = [x for x in row.get("daily", []) if isinstance(x, dict)]
+            latest = daily[0] if daily else info
+            name = str(instrument.get("lVal18AFC") or "").strip()
+            if not name or not latest:
+                invalid += 1; continue
+            segment = str((row.get("market") or {}).get("segment") or "UNKNOWN").upper()
+            segments[segment] = segments.get(segment, 0) + 1
+            if str(info.get("quoteStatus") or "ACTIVE").upper() != "ACTIVE":
+                suspended += 1; continue
+            price = _number(latest.get("pClosing", latest.get("pDrCotVal", info.get("pClosing"))))
+            previous = _number(latest.get("priceYesterday", info.get("priceYesterday")))
+            if price is None or price <= 0 or previous is None or previous <= 0:
+                invalid += 1; continue
+            volume = _number(latest.get("qTotTran5J", info.get("qTotTran5J"))) or 0.0
+            value = _number(latest.get("qTotCap", info.get("qTotCap"))) or 0.0
+            change = price - previous
+            if change > 0: up += 1
+            elif change < 0: down += 1
+            else: unchanged += 1
+            total_volume += volume; total_value += value
+            data_date = _date_string(latest.get("dEven")) or _date_string(info.get("dEven"))
+            epoch = _epoch_from_tsetmc(data_date, latest.get("hEven") or info.get("hEven"))
+            if epoch is None: epoch = _parse_generated_at(generated_at)
+            observed_at = datetime.fromtimestamp(epoch, tz=timezone.utc) if epoch else datetime.now(timezone.utc)
+            snapshots.append(MarketSnapshot(symbol=name, observed_at=observed_at, price=price,
+                previous_close=previous, volume=volume,
+                high=_number(latest.get("priceMax", info.get("priceMax"))),
+                low=_number(latest.get("priceMin", info.get("priceMin"))),
+                source="tsetmc-github-actions", market_status=market_status, data_date=data_date))
+        total = len(payload["symbols"]); eligible = len(snapshots)
+        return snapshots, {"universe_mode": "FULL_MARKET", "mirror_symbol_count": total,
+            "eligible_symbol_count": eligible, "invalid_symbol_count": invalid,
+            "suspended_symbol_count": suspended, "coverage": round(eligible / total, 4) if total else 0.0,
+            "advancers": up, "decliners": down, "unchanged": unchanged,
+            "breadth_up_pct": round(up / eligible * 100.0, 2) if eligible else None,
+            "breadth_down_pct": round(down / eligible * 100.0, 2) if eligible else None,
+            "total_volume": total_volume, "total_value": total_value,
+            "segments": segments, "generated_at": generated_at, "market_status": market_status}
+
     def snapshot(self, symbol: str) -> MarketSnapshot:
         payload = self._payload()
         row = payload["symbols"].get(symbol)
