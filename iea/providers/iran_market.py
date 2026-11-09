@@ -31,6 +31,11 @@ class IranMarketProvider:
             "Referer": "https://www.tsetmc.com/",
             "Origin": "https://www.tsetmc.com",
         })
+        # Optional explicit egress proxy for deployments outside Iran.
+        # Keep credentials in Railway/GitHub secrets; never hard-code proxy URLs.
+        proxy_url = os.getenv("IEA_TSETMC_PROXY_URL", "").strip()
+        if proxy_url:
+            self.session.proxies.update({"http": proxy_url, "https": proxy_url})
         # Railway can resolve cdn.tsetmc.com to IPv6 first while its outbound
         # IPv6 route is unreliable. urllib3 otherwise waits for the IPv6
         # connect timeout before trying IPv4. Force IPv4 for this provider.
@@ -148,7 +153,7 @@ class IranMarketProvider:
 
 
     def full_data(self, symbol: str, days: int = 500) -> dict[str, Any]:
-        """Fetch the broad TSETMC instrument dossier with endpoint-level coverage."""
+        """Fetch a broad TSETMC instrument dossier with endpoint-level coverage."""
         if not 1 <= int(days) <= 2000:
             raise ValueError("days must be between 1 and 2000")
         instrument, code = self._ins_code(symbol)
@@ -175,19 +180,15 @@ class IranMarketProvider:
         for field, (path, keys) in endpoints.items():
             try:
                 payload = self._get(path)
-                value = next((payload[k] for k in keys if k in payload), payload)
-                data[field] = value
+                data[field] = next((payload[k] for k in keys if k in payload), payload)
             except Exception as exc:
                 data[field] = None
                 errors[field] = f"{type(exc).__name__}: {exc}"
         daily = data.get("daily") or []
         data_date = _date_string(daily[0].get("dEven")) if daily and isinstance(daily[0], dict) else None
         data["metadata"] = {
-            "provider": "TSETMC REST API",
-            "base_url": self.base_url,
-            "ins_code": code,
-            "retrieved_at": retrieved_at,
-            "data_date": data_date,
+            "provider": "TSETMC REST API", "base_url": self.base_url, "ins_code": code,
+            "retrieved_at": retrieved_at, "data_date": data_date,
             "requested_history_days": int(days),
             "successful_sections": [k for k in endpoints if data.get(k) is not None],
             "failed_sections": errors,
