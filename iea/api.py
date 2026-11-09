@@ -145,6 +145,49 @@ def create_app(report_path: str | None = None) -> Any:
             analysis["data_quality"] = {"tsetmc_market": True, "one_month_history": bool(data.get("daily")), "money_flow_history": bool(data.get("client_type_history")), "major_shareholders": bool(data.get("major_shareholders")), "codal_metadata": bool(data.get("codal_filings")), "statement_content": bool(statement_content), "fundamental_statement_values": fundamentals["status"] == "READY", "multi_period_fundamentals": len(fundamentals.get("periods") or []) >= 2, "annual_fundamentals": bool(fundamentals["growth"].get("annual_eps_growth_pct") is not None or fundamentals["growth"].get("annual_revenue_growth_pct") is not None), "canslim_S": market_scores["S"] is not None, "canslim_L": market_scores["L"] is not None, "canslim_I": market_scores["I"] is not None, "canslim_M": market_scores["M"] is not None, "canslim_N": catalysts["new_catalyst"] is not None}
             return analysis
         except (RuntimeError, ValueError, OSError, KeyError) as exc: raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @app.get("/market/tsetmc/health")
+    def tsetmc_health() -> dict[str, Any]:
+        """Verify live connectivity to the official TSETMC REST API."""
+        from time import perf_counter
+        started = perf_counter()
+        try:
+            provider = IranMarketProvider()
+            matches = provider.search("ثفارس")
+            if not matches:
+                raise RuntimeError("TSETMC responded but symbol search returned no instruments")
+            exact = [x for x in matches if str(x.get("lVal18AFC", "")).strip() == "ثفارس"]
+            return {
+                "status": "ok", "source": "TSETMC REST API",
+                "base_url": provider.base_url, "tested_symbol": "ثفارس",
+                "symbol_found": bool(exact), "search_result_count": len(matches),
+                "latency_ms": round((perf_counter() - started) * 1000, 1),
+            }
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail={
+                "status": "unavailable", "source": "TSETMC REST API",
+                "error_type": type(exc).__name__, "error": str(exc),
+                "hint": "Check outbound access or configure IEA_TSETMC_PROXY_URL on this service.",
+            }) from exc
+
+    @app.get("/market/tsetmc/overview")
+    def tsetmc_market_overview() -> dict[str, Any]:
+        """Return the market-wide TSETMC overview, sectors and Bourse/IFB indices."""
+        try:
+            return IranMarketProvider().market_overview()
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @app.get("/market/tsetmc/{symbol}")
+    def tsetmc_instrument_dossier(symbol: str, days: int = 500) -> dict[str, Any]:
+        """Return the official TSETMC instrument dossier and daily chart history."""
+        if not 1 <= days <= 2000:
+            raise HTTPException(status_code=422, detail="days must be between 1 and 2000")
+        try:
+            return IranMarketProvider().full_data(symbol, days=days)
+        except (RuntimeError, ValueError, OSError, KeyError) as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
     @app.get("/answer")
     def get_answer(question: str) -> dict[str, Any]:
         try: _load_fresh_report(resolved_report_path)
