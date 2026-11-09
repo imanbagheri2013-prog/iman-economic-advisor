@@ -31,6 +31,11 @@ class IranMarketProvider:
             "Referer": "https://www.tsetmc.com/",
             "Origin": "https://www.tsetmc.com",
         })
+        # Optional explicit egress proxy for deployments outside Iran.
+        # Keep credentials in Railway/GitHub secrets; never hard-code proxy URLs.
+        proxy_url = os.getenv("IEA_TSETMC_PROXY_URL", "").strip()
+        if proxy_url:
+            self.session.proxies.update({"http": proxy_url, "https": proxy_url})
         # Railway can resolve cdn.tsetmc.com to IPv6 first while its outbound
         # IPv6 route is unreliable. urllib3 otherwise waits for the IPv6
         # connect timeout before trying IPv4. Force IPv4 for this provider.
@@ -145,6 +150,74 @@ class IranMarketProvider:
                 "volume_trend_pct": ((volumes[0] / avg_volume) - 1) * 100 if volumes and avg_volume else None},
             "money_flow": _flow_summary(client_history), "major_shareholder_change": _major_holder_change(shareholders),
         }
+
+
+    def full_data(self, symbol: str, days: int = 500) -> dict[str, Any]:
+        """Fetch a broad TSETMC instrument dossier with endpoint-level coverage."""
+        if not 1 <= int(days) <= 2000:
+            raise ValueError("days must be between 1 and 2000")
+        instrument, code = self._ins_code(symbol)
+        retrieved_at = datetime.now(timezone.utc).isoformat()
+        endpoints = {
+            "quote": (f"ClosingPrice/GetClosingPriceInfo/{code}", ("closingPriceInfo",)),
+            "instrument_info": (f"Instrument/GetInstrumentInfo/{code}", ("instrumentInfo",)),
+            "identity": (f"Instrument/GetInstrumentIdentity/{code}", ("instrumentIdentity",)),
+            "daily": (f"ClosingPrice/GetClosingPriceDailyList/{code}/{days}", ("closingPriceDaily",)),
+            "best_limits": (f"BestLimits/{code}", ("bestLimits",)),
+            "trades": (f"Trade/GetTrade/{code}", ("trade",)),
+            "intraday_trade_summary": (f"Trade/GetTradeIntraDay/{code}", ("tradeIntraDay",)),
+            "client_type": (f"ClientType/GetClientType/{code}/1/0", ("clientType",)),
+            "shareholders": (f"Shareholder/GetInstrumentShareHolderLast/{code}", ("shareHolder",)),
+            "share_changes": (f"Instrument/GetInstrumentShareChange/{code}", ("instrumentShareChange",)),
+            "price_adjustments": (f"ClosingPrice/GetPriceAdjustList/{code}", ("priceAdjustList",)),
+            "messages": (f"Msg/GetMsgByInsCode/{code}", ("msg", "messages")),
+            "statistics": (f"MarketData/GetInstrumentStatistic/{code}", ("instrumentStatistic",)),
+            "codal_filings": (f"Codal/GetPreparedDataByInsCode/30/{code}", ("preparedData",)),
+            "financial_statement_content": (f"Codal/GetStatementContentByInsCode/{code}", ("statementContent", "statementContents", "data")),
+        }
+        data: dict[str, Any] = {"instrument": instrument}
+        errors: dict[str, str] = {}
+        for field, (path, keys) in endpoints.items():
+            try:
+                payload = self._get(path)
+                data[field] = next((payload[k] for k in keys if k in payload), payload)
+            except Exception as exc:
+                data[field] = None
+                errors[field] = f"{type(exc).__name__}: {exc}"
+        daily = data.get("daily") or []
+        data_date = _date_string(daily[0].get("dEven")) if daily and isinstance(daily[0], dict) else None
+        data["metadata"] = {
+            "provider": "TSETMC REST API", "base_url": self.base_url, "ins_code": code,
+            "retrieved_at": retrieved_at, "data_date": data_date,
+            "requested_history_days": int(days),
+            "successful_sections": [k for k in endpoints if data.get(k) is not None],
+            "failed_sections": errors,
+            "coverage_pct": round(sum(data.get(k) is not None for k in endpoints) / len(endpoints) * 100, 1),
+        }
+        return data
+
+    def market_overview(self) -> dict[str, Any]:
+        """Fetch market-wide overview, sectors and both exchange index sets."""
+        paths = {
+            "bourse_overview": ("MarketData/GetMarketOverview/1", ("marketOverview",)),
+            "farabourse_overview": ("MarketData/GetMarketOverview/2", ("marketOverview",)),
+            "sectors": ("MarketData/GetSectorsSummary", ("sectorSummeries", "sectorsSummary")),
+            "bourse_indices": ("Index/GetIndexB1LastAll/All/1", ("indexB1",)),
+            "farabourse_indices": ("Index/GetIndexB1LastAll/All/2", ("indexB1",)),
+            "all_instrument_values": ("MarketData/GetInstValueAllInstAllParam", ("instValueAllInstAllParam",)),
+        }
+        result: dict[str, Any] = {"retrieved_at": datetime.now(timezone.utc).isoformat(), "source": "TSETMC REST API"}
+        errors: dict[str, str] = {}
+        for field, (path, keys) in paths.items():
+            try:
+                payload = self._get(path)
+                result[field] = next((payload[k] for k in keys if k in payload), payload)
+            except Exception as exc:
+                result[field] = None
+                errors[field] = f"{type(exc).__name__}: {exc}"
+        result["errors"] = errors
+        result["coverage_pct"] = round(sum(result.get(k) is not None for k in paths) / len(paths) * 100, 1)
+        return result
 
 
 def configured_iran_symbols() -> list[str]:
